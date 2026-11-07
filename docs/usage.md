@@ -5,8 +5,9 @@ session and unsent drafts.
 
 ## The window
 
-- **Session list (left).** Your Hermes sessions, newest first. A green dot means Hermes is
-  working. Yellow means it waits for you. `NEW` marks an unread reply. Hover a row for details.
+- **Session list (left).** Your Hermes sessions, newest first, pinned ones on top (gold star).
+  A green dot means Hermes is working. Yellow means it waits for you. `NEW` marks an unread
+  reply. Hover a row for details. Type in **Search sessions** to filter by title.
 - **Conversation (right).** Click a message to copy its text. Messages show in full up to 6,000
   characters; the middle of a longer one is cut, with a note. Click "earlier messages not shown"
   to load 40 more.
@@ -23,9 +24,53 @@ session and unsent drafts.
   your Hermes profile is signed in to. Default uses the profile's model. Existing sessions keep
   their model.
 - **Stop** interrupts the turn Hermes runs in the open session.
+- **Pin and rename.** Right-click a session for **Pin to top**, **Rename...** and **Mark as
+  read**. Pins and names are stored in Hermes, so Hermes Desktop shows them too.
 - **Questions and approvals.** When Hermes asks a question or asks to approve a command, a panel
   opens above the message box with its choices. For a free-text answer, type it in the message
   box and click **Answer**.
+
+## Quick questions from chat
+
+Ask without opening the window:
+
+```
+/hermes ask Which flight path is closest to Tarren Mill?
+/hermes look What is this mob, and can I solo it?
+```
+
+- `ask` sends the question; `look` also attaches a screenshot of the game.
+- The question goes to the conversation open in the window. With none open (New mode), it
+  starts a new conversation.
+- The reply appears in chat: up to 8 lines, Markdown removed. Type `/hermes` to read the rest.
+- Item links work here too: shift-click an item into the chat line.
+- The **Game info** setting applies.
+
+## Screenshots
+
+Check **Screenshot** (under Game info) to attach a screenshot of the game to your next
+message. The box clears after each message.
+
+- The window hides for a moment, so the picture shows the game, not the conversation. It comes
+  back once the companion has taken the screenshot.
+- Hermes needs a model or vision tool that reads images. The conversation shows
+  `[Screenshot]` before your message.
+- The screenshot is a PNG of the game window, saved in Hermes's image cache
+  (`%LOCALAPPDATA%\hermes\cache\images\hermeswow-*.png`). The companion deletes these files
+  after a week.
+
+## Combat
+
+When combat starts, the message box gives the keyboard back to the game. What else happens
+depends on the combat mode:
+
+| Mode | Window | Sounds and toasts |
+|---|---|---|
+| `hide` (default) | Hides, and comes back when combat ends. | Held until combat ends, then one summary. |
+| `fade` | Stays, nearly transparent. | Held until combat ends, then one summary. |
+| `off` | No change. | No change. |
+
+Set it with `/hermes combat hide`, `/hermes combat fade` or `/hermes combat off`.
 
 ## Formatting
 
@@ -70,6 +115,9 @@ works. The icon turns grey when the connection has a problem.
 | Command | Effect |
 |---|---|
 | `/hermes` | Open or close the window. |
+| `/hermes ask <question>` | Ask without opening the window; the reply appears in chat. |
+| `/hermes look <question>` | The same, with a screenshot of the game. |
+| `/hermes combat hide` or `fade` or `off` | Choose what the window does in combat. |
 | `/hermes status` | Print diagnostics. |
 | `/hermes refresh` | Ask for a fresh session list. |
 | `/hermes reset` | Move the window back to the center. |

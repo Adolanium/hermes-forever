@@ -42,7 +42,11 @@ function Mock.HasFocus(self) return self._focus or false end
 function Mock.SetFocus(self) self._focus = true end
 function Mock.ClearFocus(self) self._focus = false end
 function Mock.GetFrameLevel() return 1 end
+function Mock.GetEffectiveScale() return 1 end
 function Mock.SetColorTexture(self, r, g, b) self._color = { r, g, b } end
+function Mock.SetAlpha(self, a) self._alpha = a end
+function Mock.SetChecked(self, v) self._checked = v and true or false end
+function Mock.GetChecked(self) return self._checked or false end
 function Mock.SetPoint(self, p, a, b, c, d)
 	-- Strip cells: SetPoint("TOPLEFT", strip, "TOPLEFT", x, y)
 	if type(c) == "number" and type(d) == "number" then self._x, self._y = c, d end
@@ -72,6 +76,10 @@ for _, f in ipairs({ "ChatFontNormal", "GameFontNormal", "GameFontHighlight", "G
 	_G[f] = New("Font", f)
 end
 UISpecialFrames = {}
+StaticPopupDialogs = {}
+STUB.popups = {}
+function StaticPopup_Show(which, _, _, data) table.insert(STUB.popups, { which = which, data = data }) end
+function IsMouseButtonDown() return false end
 SlashCmdList = {}
 tinsert = table.insert
 function GameTooltip_Hide() end

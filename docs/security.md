@@ -6,7 +6,8 @@
 - **Normal addon APIs only.** No game memory access, no injection and no network traffic from
   the addon. The addon uses only UI, sound and `LoadAddOn` APIs.
 - **Limited companion access.** The companion reads pixels from the game window's top-left
-  corner and writes files inside the AddOns folder.
+  corner and writes files inside the AddOns folder. It captures the whole game window only when
+  you ask for a screenshot, and saves it in Hermes's image cache for that message.
 - **Message content is data.** The companion escapes every byte when it writes Lua and strips
   control characters. The addon escapes `|`, so text cannot become WoW color codes, links or
   textures. The slot files are plain Lua data tables.

@@ -37,6 +37,10 @@ game keeps running.
 - Full conversation history, rendered from Markdown, with copyable links.
 - Continue any existing session with its context, or start a new one with a model you pick.
 - Stop a running turn. Answer clarify questions and command approvals.
+- Ask from the chat line with `/hermes ask`; the reply appears in chat.
+- Attach a screenshot of the game, so Hermes sees what you see (`/hermes look`).
+- Search, pin and rename sessions.
+- Combat-aware: the window steps aside in combat, and notifications wait until it ends.
 - Shift-click items, spells and quests into a message. Hermes gets their tooltip text.
 - Optional game info (zone, target, health, quest log) sent to the model with each message.
 - Sound, toast and minimap badge when a reply arrives or Hermes needs you.

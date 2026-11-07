@@ -12,7 +12,7 @@ local H = {}
 HermesWoW = H
 local Codec = HermesWoW_Codec
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 local SLOT_COUNT = 200
 local CELL, CELLS_PER_ROW, MAX_ROWS = 4, 200, 48
 local US, RS = "\31", "\30"
@@ -112,6 +112,7 @@ local function InitDB()
 	db.rows = db.rows or {}
 	db.notify = db.notify or { sound = true, toast = true }
 	db.minimap = db.minimap or { angle = 200, hide = false }
+	db.combat = db.combat or "hide"   -- what the window does in combat: "hide", "fade" or "off"
 	H.db = db
 	for _, rec in ipairs(db.outbox) do rec.shownAt = nil end  -- GetTime() values from a previous session
 	-- Sends older than a day that never settled are history, not pending work.
@@ -337,6 +338,13 @@ function H.ApplyInbox(data)
 							H.Open(st.sid)
 						end
 					end
+					if s.shot == "wanted" and st.shot then
+						s.shot = st.shot
+						if st.shot == "failed" then
+							H.Print("could not take the screenshot (" .. H.Escape(st.shot_err or "unknown error") .. "); the message went without it.")
+						end
+						if H.ShotDone then H.ShotDone() end
+					end
 				end
 			end
 		end
@@ -361,6 +369,7 @@ function H.ApplyInbox(data)
 		local sel = db.selected and data.views[db.selected]
 		if sel then db.cache.view = { sid = db.selected, data = sel } end
 	end
+	H.PrintQuickReplies()
 	H.Changed()
 end
 
@@ -402,7 +411,8 @@ function H.UpdateUnread(sessions)
 		elseif s.n > seen and s.status ~= "running" and not (run.notified and run.notified[s.id] == s.n) then
 			run.notified = run.notified or {}
 			run.notified[s.id] = s.n
-			if not shown then
+			-- A quick question's reply is printed in full by PrintQuickReplies instead.
+			if not shown and not H.QuickPending(s.id) then
 				H.Print("new reply in |cffffffff" .. H.Escape(s.title ~= "" and s.title or "Untitled") .. "|r - type /hermes to read it.")
 			end
 			if H.Notify then H.Notify("reply", s.id, s.title) end
@@ -624,12 +634,17 @@ function H.ModelExtras(links)
 end
 
 -- Send text to a session, or to a new session when sid is nil (model = { p = provider, m = model }
--- or nil for the profile default). `extra` reaches the model only. Returns the id or nil, why.
-function H.Send(sid, text, extra, model)
+-- or nil for the profile default). `extra` reaches the model only. opts.shot asks the companion
+-- to attach a screenshot of the game; opts.quick prints the reply in chat. Returns the id or nil, why.
+function H.Send(sid, text, extra, model, opts)
+	opts = opts or {}
 	text = (text or ""):gsub("\r", ""):gsub(GS, "")
 	text = text:gsub("^%s+", ""):gsub("%s+$", "")
 	if text == "" then return nil, "empty" end
-	local payload = text .. (extra and (GS .. extra:gsub(GS, "")) or "")
+	-- Payload: message <GS> model-only text <GS> flags.
+	local payload = text
+	if extra or opts.shot then payload = payload .. GS .. (extra or ""):gsub(GS, "") end
+	if opts.shot then payload = payload .. GS .. "shot" end
 	if #payload > H.MAX_MESSAGE then return nil, "too long" end
 	local last = run.lastSend
 	if last and last.sid == sid and last.text == text and Now() - last.at < 3 then
@@ -642,11 +657,102 @@ function H.Send(sid, text, extra, model)
 	for i, p in ipairs(parts) do
 		H.Enqueue(sid and "send" or "new", { target, tostring(mid), tostring(i), tostring(#parts), p })
 	end
-	db.sends[mid] = { sid = sid, text = text, state = "sending", t = time(), isNew = not sid, parts = #parts }
+	db.sends[mid] = { sid = sid, text = text, state = "sending", t = time(), isNew = not sid, parts = #parts,
+		shot = opts.shot and "wanted" or nil, quick = opts.quick or nil }
 	run.lastSend = { sid = sid, text = text, at = Now() }
 	if not sid then run.awaitNew = mid end
 	H.Changed()
 	return mid
+end
+
+-- Ask from the chat line (/hermes ask, /hermes look): goes to the open conversation, or starts a
+-- new one; the reply is printed in chat.
+function H.QuickAsk(raw, shot)
+	local text, links = H.ExpandLinks(raw)
+	local sid = db.selected
+	local mid, why = H.Send(sid, text, H.ModelExtras(links), not sid and db.newModel or nil, { shot = shot, quick = true })
+	if not mid then
+		if why == "empty" then
+			H.Print("usage: /hermes " .. (shot and "look" or "ask") .. " <question>")
+		elseif why == "too long" then
+			H.Print(string.format("message too long (limit %d bytes).", H.MAX_MESSAGE))
+		end
+		return
+	end
+	local row = sid and H.SessionRow(sid)
+	H.Print((shot and "asked with a screenshot" or "asked") .. " in |cffffffff"
+		.. H.Escape(row and row.title ~= "" and row.title or (sid and "the open conversation" or "a new conversation"))
+		.. "|r. The reply will appear here.")
+	if shot and H.HideForShot then H.HideForShot(mid) end
+end
+
+-- True while a quick question to this session waits for its reply.
+function H.QuickPending(sid)
+	for _, s in pairs(db.sends) do
+		if s.quick and not s.printed and s.sid == sid then return true end
+	end
+	return false
+end
+
+-- Reply text for the chat frame: Markdown markers dropped, "|" escaped, a few lines at most.
+local function ChatLines(text, max)
+	local out = {}
+	for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+		line = line:gsub("^%s*```.*$", ""):gsub("^#+%s*", ""):gsub("%*%*", ""):gsub("`", "")
+		line = line:gsub("^%s*[-*]%s+", "  - ")
+		if line:match("%S") then
+			while #line > 0 and #out < max do
+				local piece = SplitUtf8(line, 240)[1]
+				if #line > #piece then piece = piece:match("^(.*%s)%S*$") or piece end
+				out[#out + 1] = H.Escape(piece)
+				line = line:sub(#piece + 1)
+			end
+		end
+		if #out >= max then break end
+	end
+	return out
+end
+H.ChatLines = ChatLines
+
+function H.PrintQuickReplies()
+	for _, s in pairs(db.sends) do
+		if s.quick and not s.printed and s.sid then
+			local v = run.views[s.sid]
+			local last = v and v.msgs and v.msgs[#v.msgs]
+			if s.state == "error" then
+				s.printed = true
+				H.Print("|cffff4040could not send:|r " .. H.Escape(s.err or "unknown error"))
+			elseif v and not v.running and last and last.r == "assistant" and (last.ts or 0) >= (s.t or 0) then
+				s.printed = true
+				if not (H.IsShown and H.IsShown() and db.selected == s.sid) then
+					local lines = ChatLines(last.t or "", 8)
+					local total = #ChatLines(last.t or "", 9)
+					DEFAULT_CHAT_FRAME:AddMessage("|cffffd100Hermes:|r " .. (lines[1] or ""))
+					for i = 2, #lines do DEFAULT_CHAT_FRAME:AddMessage("  " .. lines[i]) end
+					if total > #lines then DEFAULT_CHAT_FRAME:AddMessage("  |cff808080... type /hermes to read the rest.|r") end
+				end
+			end
+		end
+	end
+end
+
+-- Session list edits. The list row changes right away; the companion's next list confirms it.
+function H.Pin(sid, on)
+	local row = H.SessionRow(sid)
+	if row then row.pin = on end
+	H.Enqueue("pin", { sid, on and "1" or "0" })
+	H.Changed()
+end
+
+function H.Rename(sid, title)
+	title = (title or ""):gsub("[%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")
+	if title == "" then return end
+	local row = H.SessionRow(sid)
+	if row then row.title = title end
+	local v = run.views[sid]
+	if v then v.title = title end
+	H.Enqueue("rename", { sid, title })
+	H.Changed()
 end
 
 function H.Stop(sid) H.Enqueue("stop", { sid }) H.Changed() end
@@ -747,6 +853,8 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_LOGIN")
+events:RegisterEvent("PLAYER_REGEN_DISABLED")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:SetScript("OnEvent", function(_, event, name)
 	if event == "ADDON_LOADED" and name == "HermesWoW" then
 		InitDB()
@@ -758,13 +866,33 @@ events:SetScript("OnEvent", function(_, event, name)
 		if db.selected then H.Open(db.selected) end
 		WantLoad(0)
 		C_Timer.NewTicker(0.25, Tick)
+	elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+		run.inCombat = event == "PLAYER_REGEN_DISABLED"
+		if H.OnCombat then H.OnCombat(run.inCombat) end
 	end
 end)
 
+function H.InCombat() return run.inCombat and db.combat ~= "off" or false end
+
+local COMBAT_MODES = {
+	hide = "the window hides in combat and comes back after it; sounds and toasts wait until combat ends",
+	fade = "the window fades in combat; sounds and toasts wait until combat ends",
+	off = "nothing changes in combat",
+}
+
 SLASH_HERMESWOW1 = "/hermes"
-SlashCmdList.HERMESWOW = function(msg)
-	msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-	if msg == "status" then
+SlashCmdList.HERMESWOW = function(raw)
+	raw = (raw or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	local cmd, rest = raw:match("^(%S*)%s*(.-)$")
+	cmd = cmd:lower()
+	local msg = raw:lower()
+	if cmd == "ask" or cmd == "look" then
+		H.QuickAsk(rest, cmd == "look")
+	elseif cmd == "combat" then
+		local mode = rest:lower()
+		if COMBAT_MODES[mode] then db.combat = mode end
+		H.Print("combat mode: " .. db.combat .. " - " .. COMBAT_MODES[db.combat] .. ".")
+	elseif msg == "status" then
 		local level, text, detail = H.Status()
 		H.Print(text .. " (" .. level .. ")")
 		for _, l in ipairs(detail) do H.Print("  " .. l) end
@@ -781,6 +909,9 @@ SlashCmdList.HERMESWOW = function(msg)
 		H.Print(key .. " notifications " .. (H.db.notify[key] and "on" or "off") .. ".")
 	elseif msg == "help" then
 		H.Print("/hermes - open or close the window")
+		H.Print("/hermes ask <question> - ask without opening the window; the reply appears in chat")
+		H.Print("/hermes look <question> - the same, with a screenshot of the game")
+		H.Print("/hermes combat hide | fade | off - what the window does in combat")
 		H.Print("/hermes status | refresh | reset | minimap | sound on/off | toast on/off")
 	else
 		if H.Toggle then H.Toggle() end

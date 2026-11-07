@@ -51,6 +51,15 @@ and `model.options`. Stored sessions come from Hermes's session database, opened
 Item tooltips and game info travel in `prompt.submit`'s `api_text`. The model sees them; the
 stored transcript keeps only the typed text.
 
+A screenshot is a PNG that the companion writes into Hermes's image cache, the one folder
+`prompt.submit` accepts `attachments` from. `api_text` replaces the whole model-facing message,
+including the image description Hermes adds for an attachment. So when a screenshot goes with
+game info or links, `api_text` also tells the model where the image is.
+
+Pin and rename use `session.mutate` (`sidebar` with `pinned`, and `rename`). The edit is fenced
+by the session's revision. On a stale revision, the companion reloads the session and retries
+once.
+
 ## Limits and reload rules
 
 - **200 reply slots per UI session.** A short exchange uses 2 to 5. Progress updates use about
@@ -72,6 +81,7 @@ stored transcript keeps only the typed text.
 - **In-game copies of long replies are trimmed** to 6,000 characters each and about 110 KB per
   update. The full text stays in Hermes.
 - Reasoning text is not shown. Tool activity, status lines and the streamed reply are.
+- **Search covers the 100 most recent sessions**, the ones the companion lists.
 
 ## Reliability
 

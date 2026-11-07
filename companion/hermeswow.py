@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import uuid
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -35,12 +36,12 @@ log = logging.getLogger("hermeswow")
 
 PROTOCOL = "HW1"
 US, RS = "\x1f", "\x1e"
-GS = "\x1d"   # in a send payload: the message, then text only the model sees
+GS = "\x1d"   # in a send payload: the message, text only the model sees, then flags ("shot")
 MAGIC = (0xC7, 0x1A)
 CELL, CELLS_PER_ROW, MAX_ROWS = 4, 200, 48
 SIGNAL_MAX = {"b": 3000, "t": 3000, "h": 3000}  # must match install.py
 BEAT_SECONDS = 20
-LIST_LIMIT = 60
+LIST_LIMIT = 100
 VIEW_ROWS = 40            # displayable rows sent for the selected session
 OTHER_VIEW_ROWS = 6       # for other recently opened sessions
 MSG_CAP = 6000            # characters per message sent to the game
@@ -136,6 +137,17 @@ def content_text(content) -> str:
     return ""
 
 
+# Hermes stores a user message with an image as "[The user sent an image~ ...image_url: <path> ~]"
+# notes before the typed text; the game shows a short marker instead.
+_IMAGE_NOTE = re.compile(r"\[The user sent an image.*?image_url: [^\]]*\]\s*", re.S)
+SHOT_MARK = "[Screenshot] "
+
+
+def user_text(text: str) -> str:
+    stripped, n = _IMAGE_NOTE.subn("", text)
+    return (SHOT_MARK + stripped.strip()) if n else text
+
+
 def project_messages(messages) -> list[dict]:
     """Stored transcript rows -> rows the game shows: user/assistant text, tool calls folded
     into one compact line per run of calls, tool results and system rows left out."""
@@ -145,7 +157,7 @@ def project_messages(messages) -> list[dict]:
         ts = m.get("timestamp")
         ts = int(ts) if isinstance(ts, (int, float)) else None
         if role == "user":
-            text = content_text(m.get("content")).strip()
+            text = user_text(content_text(m.get("content")).strip())
             if text:
                 rows.append({"r": "user", "t": clean(text), "ts": ts})
         elif role == "assistant":
@@ -226,13 +238,20 @@ class Capture:
 
     def grab(self):
         """BGRA bytes of the client area's top-left strip region, or None."""
+        return self._grab(self.width, self.height, CELL * 8, CELL)
+
+    def grab_full(self):
+        """BGRA bytes of the whole client area (a screenshot of the game), or None."""
+        return self._grab(1 << 16, 1 << 16, 64, 64)
+
+    def _grab(self, max_w, max_h, min_w, min_h):
         hwnd = self.hwnd
         if not hwnd or not self.user32.IsWindow(hwnd) or self.user32.IsIconic(hwnd):
             return None
         rect = wt.RECT()
         self.user32.GetClientRect(hwnd, ctypes.byref(rect))
-        w, h = min(self.width, rect.right), min(self.height, rect.bottom)
-        if w < CELL * 8 or h < CELL:
+        w, h = min(max_w, rect.right), min(max_h, rect.bottom)
+        if w < min_w or h < min_h:
             return None
         pt = wt.POINT(0, 0)
         self.user32.ClientToScreen(hwnd, ctypes.byref(pt))
@@ -260,6 +279,19 @@ class Capture:
             self.gdi32.DeleteObject(bmp)
             self.gdi32.DeleteDC(mem)
             self.user32.ReleaseDC(0, screen)
+
+
+def encode_png(bgra: bytes, w: int, h: int) -> bytes:
+    """Top-down BGRA pixels -> an RGB PNG file."""
+    rgb = bytearray(w * h * 3)
+    rgb[0::3], rgb[1::3], rgb[2::3] = bgra[2::4], bgra[1::4], bgra[0::4]
+    stride = w * 3
+    raw = b"".join(b"\x00" + rgb[y * stride:(y + 1) * stride] for y in range(h))
+
+    def chunk(kind, data):
+        return len(data).to_bytes(4, "big") + kind + data + (zlib.crc32(kind + data) & 0xFFFFFFFF).to_bytes(4, "big")
+    header = w.to_bytes(4, "big") + h.to_bytes(4, "big") + bytes((8, 2, 0, 0, 0))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b"")
 
 
 def decode_strip(buf: bytes, w: int, h: int):
@@ -367,6 +399,7 @@ class View:
         self.error = None
         self.loaded = False
         self.model = None
+        self.revision = 0
 
 
 class Companion:
@@ -396,6 +429,8 @@ class Companion:
         self.wake = asyncio.Event()
         self.refresh_pending: set[str] = set()
         self.attach_locks: dict[str, asyncio.Lock] = {}
+        self.shot_tasks: dict[str, asyncio.Task] = {}
+        self.strip_at = 0.0              # monotonic time the strip was last seen on screen
 
     # -- signals ---------------------------------------------------------------------------
 
@@ -545,6 +580,8 @@ class Companion:
                 grabbed = cap.grab()
                 if grabbed:
                     res = decode_strip(*grabbed)
+                    if res:
+                        self.strip_at = now
                     if res and res[0] == "error":
                         if now - last_warn > 10:
                             last_warn = now
@@ -672,18 +709,23 @@ class Companion:
                 del self.store.data["parts"][key]
                 # The payload is "message<GS>model-only text"; for "new" the first field is the
                 # chosen model ("provider<GS>model", "" = profile default) instead of a session.
-                text, _, extra = full.partition(GS)
+                text, _, rest = full.partition(GS)
+                extra, _, flags = rest.partition(GS)
                 model = target if op == "new" else ""
                 sid = "" if op == "new" else target
-                self.store.data["jobs"].append({"tok": tok, "mid": mid, "op": op, "sid": sid, "text": text,
-                                                "extra": extra, "model": model})
+                job = {"tok": tok, "mid": mid, "op": op, "sid": sid, "text": text, "extra": extra, "model": model}
+                if "shot" in flags.split(","):
+                    job["shot"] = "pending"
+                self.store.data["jobs"].append(job)
                 self.set_send(tok, mid, state="received", sid=sid or None)
+                if job.get("shot"):
+                    self.start_shot(job)
                 self.wake_jobs()
             else:
                 self.set_send(tok, mid, state="receiving", got=len(entry["parts"]), n=entry["n"])
             self.store.save()
             return
-        if op in ("stop", "approve", "answer") and args:
+        if op in ("stop", "approve", "answer", "pin", "rename") and args:
             self.ack(tok, rid)
             self.store.save()
             asyncio.create_task(self.control(tok, op, args))
@@ -795,11 +837,12 @@ class Companion:
                          "at": int(s.get("last_active") or s.get("started_at") or lv.get("started_at") or 0),
                          "src": s.get("source") or lv.get("source") or "",
                          "model": s.get("model") or lv.get("model") or "",
+                         "pin": bool(s.get("pinned") or lv.get("pinned")),
                          "status": "waiting" if waiting else ("running" if running else ("live" if lv else "idle"))})
-        rows.sort(key=lambda r: (r["status"] in ("running", "waiting"), r["at"]), reverse=True)
+        rows.sort(key=lambda r: (r["pin"], r["status"] in ("running", "waiting"), r["at"]), reverse=True)
         rows = rows[:LIST_LIMIT]
-        changed = [(r["id"], r["n"], r["status"], r["title"]) for r in rows] != \
-                  [(r["id"], r["n"], r["status"], r["title"]) for r in self.sessions]
+        key = ("id", "n", "status", "title", "pin")
+        changed = [tuple(r.get(k) for k in key) for r in rows] != [tuple(r.get(k) for k in key) for r in self.sessions]
         self.sessions = rows
         if changed or ring:
             now = time.monotonic()
@@ -881,6 +924,7 @@ class Companion:
         v.total = int(snap.get("message_count") or 0)
         v.running = bool(snap.get("running"))
         v.generation = int(snap.get("execution_generation") or 0)
+        v.revision = int(snap.get("revision") or 0)
         v.pending = [p for p in (snap.get("pending") or []) if p.get("status") in ("queued", "started")]
         v.prompts = {p["prompt_id"]: self.prompt_row(p) for p in (snap.get("prompts") or []) if p.get("prompt_id")}
         if not v.running:
@@ -1017,6 +1061,58 @@ class Companion:
                     st["outcome"] = outcome
                 self.store.save()
 
+    # -- screenshots -------------------------------------------------------------------------
+
+    def start_shot(self, job):
+        key = f"{job['tok']}:{job['mid']}"
+        if key not in self.shot_tasks:
+            self.shot_tasks[key] = asyncio.create_task(self.take_shot(job))
+        return self.shot_tasks[key]
+
+    async def take_shot(self, job):
+        """Capture the game for a message that asked for a screenshot. The addon hides its
+        window for it; wait until the strip is gone too (the addon stops drawing it once the
+        record is acknowledged), then save the PNG into Hermes's image cache, the one folder
+        prompt.submit accepts attachments from."""
+        if job.get("shot") != "pending":
+            return
+        path, err = None, None
+        try:
+            if self.args.inject:
+                # Tests have no game window: a 64x64 test image (red, with a blue square).
+                bgra = bytearray(b"\x20\x20\xd0\xff" * 64 * 64)
+                for y in range(20, 44):
+                    for x in range(20, 44):
+                        bgra[(y * 64 + x) * 4:(y * 64 + x) * 4 + 3] = b"\xd0\x30\x20"
+                grabbed = (bytes(bgra), 64, 64)
+            else:
+                start = time.monotonic()
+                await asyncio.sleep(0.3)
+                while time.monotonic() - self.strip_at < 0.5 and time.monotonic() - start < 4:
+                    await asyncio.sleep(0.1)
+                grabbed = await asyncio.to_thread(self.capture.grab_full)
+            if not grabbed:
+                err = "the game window was not found or is minimized"
+            else:
+                from gateway.platforms.base import get_image_cache_dir
+                folder = get_image_cache_dir().resolve()
+                folder.mkdir(parents=True, exist_ok=True)
+                target = folder / f"hermeswow-{job['tok']}-{job['mid']}.png"
+                data = await asyncio.to_thread(encode_png, *grabbed)
+                await asyncio.to_thread(target.write_bytes, data)
+                path = str(target)
+                log.info("screenshot %dx%d for message %s (%d KB)", grabbed[1], grabbed[2], job["mid"],
+                         len(data) // 1024)
+        except Exception as exc:
+            log.warning("screenshot: %s", exc)
+            err = str(exc) or type(exc).__name__
+        job["shot"] = path or ""
+        if err:
+            job["shot_err"] = clean(err, 200)
+        self.store.save()
+        self.set_send(job["tok"], job["mid"], shot="ok" if path else "failed", shot_err=job.get("shot_err"))
+        self.shot_tasks.pop(f"{job['tok']}:{job['mid']}", None)
+
     # -- jobs (messages to send) -----------------------------------------------------------
 
     def wake_jobs(self):
@@ -1087,17 +1183,46 @@ class Companion:
         # Game context and linked tooltips reach the model through api_text; the transcript
         # keeps only what the player typed.
         extra = (job.get("extra") or "").strip()
-        model_text = {"api_text": f"{extra}\n\n{text}"} if extra else {}
+        if job.get("shot") == "pending":
+            await self.start_shot(job)
+        shot = job.get("shot")
+        if job.get("shot_err"):
+            note = f"[The user asked to attach a screenshot of the game, but it could not be taken: {job['shot_err']}.]"
+            extra = f"{extra}\n\n{note}" if extra else note
+        if shot and extra:
+            # api_text replaces the whole model-facing message, including the image description
+            # Hermes adds for an attachment, so point the model at the image itself.
+            extra += (f"\n\n[The user attached a screenshot of the game. Look at it with vision_analyze "
+                      f"(image_url: {shot}) before answering.]")
+        params = {"api_text": f"{extra}\n\n{text}"} if extra else {}
+        if shot:
+            params["attachments"] = [{"path": shot, "mime": "image/png"}]
         receipt = await self.client.rpc("prompt.submit", session_id=sid, text=text,
-                                        submission_id=f"hermeswow-{tok}-{mid}", _timeout=60, **model_text)
+                                        submission_id=f"hermeswow-{tok}-{mid}", _timeout=60, **params)
         status = receipt.get("status") or "queued"
         self.set_send(tok, mid, state=("started" if status == "started" else "queued") if status != "terminal" else "done",
                       sid=sid, admission=receipt.get("admission_id"), err=None)
         if not any(r.get("r") == "user" and r.get("mid") == mid for r in v.rows):
-            v.rows.append({"r": "user", "t": clean(text), "ts": int(time.time()), "mid": mid,
-                           "keep": time.time() + 120})
+            v.rows.append({"r": "user", "t": clean((SHOT_MARK if shot else "") + text), "ts": int(time.time()),
+                           "mid": mid, "keep": time.time() + 120})
         self.watch(sid)
         self.mark("b")
+
+    async def mutate(self, v: View, operation, payload):
+        """A revision-fenced session edit; on a stale revision, reload the session and retry once."""
+        from hermes_cli.gateway_client import GatewayRPCError
+        for attempt in (1, 2):
+            try:
+                r = await self.client.rpc("session.mutate", session_id=v.sid, operation=operation, payload=payload,
+                                          request_id=f"hermeswow-{uuid.uuid4().hex}", expected_revision=v.revision,
+                                          _timeout=30)
+                v.revision = int(r.get("revision") or v.revision)
+                return r
+            except GatewayRPCError as exc:
+                if attempt == 2:
+                    raise
+                log.info("%s %s: %s; reloading the session and retrying", operation, v.sid[:16], exc)
+                await self.attach(v.sid, refresh=True)
 
     async def control(self, tok, op, args):
         from hermes_cli.gateway_client import GatewayRPCError
@@ -1116,6 +1241,15 @@ class Companion:
                 await self.client.rpc("approval.respond", session_id=sid, prompt_id=args[1], choice=args[2],
                                       execution_generation=prompt.get("gen", v.generation))
                 v.prompts.pop(args[1], None)
+            elif op in ("pin", "rename") and len(args) >= 2:
+                payload = ({"pinned": args[1] == "1"} if op == "pin"
+                           else {"title": clean(US.join(args[1:]), 120).replace("\n", " ").strip()})
+                if op == "rename" and not payload["title"]:
+                    return
+                await self.mutate(v, "sidebar" if op == "pin" else "rename", payload)
+                if op == "rename":
+                    v.title = payload["title"]
+                await self.refresh_list(ring=True)
             elif op == "answer" and len(args) >= 3:
                 prompt = v.prompts.get(args[1]) or {}
                 await self.client.rpc("clarify.respond", session_id=sid, prompt_id=args[1], answer=US.join(args[2:]),
@@ -1125,6 +1259,16 @@ class Companion:
             if v is not None:
                 v.error = f"{op} failed: {exc}"
         self.mark("b")
+
+    def prune_shots(self):
+        """Screenshots older than a week belong to finished turns."""
+        try:
+            from gateway.platforms.base import get_image_cache_dir
+            for f in get_image_cache_dir().glob("hermeswow-*.png"):
+                if time.time() - f.stat().st_mtime > 7 * 86400:
+                    f.unlink()
+        except Exception as exc:
+            log.debug("prune screenshots: %s", exc)
 
     # -- main ------------------------------------------------------------------------------
 
@@ -1141,6 +1285,7 @@ class Companion:
         else:
             threading.Thread(target=self.capture_thread, args=(loop,), daemon=True).start()
         self.wake_jobs()
+        self.prune_shots()
         log.info("HermesWoW companion: %d slots, addons at %s", len(self.slot_files), self.addons)
         await asyncio.gather(self.gateway_loop(), self.record_loop(), self.publisher(), self.job_loop(),
                              self.list_ticker())
@@ -1166,6 +1311,7 @@ def main():
         import hermes_cli.gateway_client  # noqa: F401
         import hermes_cli.web_server_sessions  # noqa: F401
         import websockets.protocol  # noqa: F401
+        import gateway.platforms.base  # noqa: F401
     except ImportError as exc:
         log.error("cannot import Hermes (%s). Start this with start.ps1, which uses Hermes's Python.", exc)
         sys.exit(2)

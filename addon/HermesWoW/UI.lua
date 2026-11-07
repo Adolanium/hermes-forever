@@ -10,7 +10,9 @@ H.ui = ui
 
 local LIST_WIDTH = 230
 local ROW_HEIGHT = 38
-local INPUT_HEIGHT = 74
+local INPUT_HEIGHT = 96
+local SEARCH_HEIGHT = 26
+local PIN_ICON = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1"
 local CHUNK = 3000          -- characters per FontString; longer messages continue in the next block
 
 local ROLE = {
@@ -223,30 +225,162 @@ local function CreateRow(parent)
 	b.title:SetWordWrap(false)
 	b.sub = b:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
 	b.sub:SetPoint("TOPLEFT", b.title, "BOTTOMLEFT", 0, -3)
-	b.sub:SetPoint("RIGHT", -6, 0)
+	b.sub:SetPoint("RIGHT", -22, 0)
 	b.sub:SetJustifyH("LEFT")
 	b.sub:SetWordWrap(false)
 	b.badge = b:CreateFontString(nil, "ARTWORK", "GameFontGreenSmall")
 	b.badge:SetPoint("TOPRIGHT", -6, -6)
-	b:SetScript("OnClick", function(self)
+	b.pin = b:CreateTexture(nil, "ARTWORK")
+	b.pin:SetSize(13, 13)
+	b.pin:SetPoint("BOTTOMRIGHT", -6, 5)
+	b.pin:SetTexture(PIN_ICON)
+	b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	b:SetScript("OnClick", function(self, mouse)
+		if mouse == "RightButton" then
+			H.ShowRowMenu(self)
+			return
+		end
 		if ui.input then H.SaveDraft() end
 		H.Open(self.sid)
 	end)
 	Tooltip(b, function(tt, self)
 		local s = self.row
 		tt:AddLine(H.Escape(s.title ~= "" and s.title or "Untitled"), 1, 1, 1, true)
-		tt:AddLine("Status: " .. s.status, nil, nil, nil)
+		tt:AddLine("Status: " .. s.status .. (s.pin and ", pinned" or ""), nil, nil, nil)
 		tt:AddLine(s.n .. " messages" .. (s.at and s.at > 0 and (", started " .. date("%Y-%m-%d %H:%M", s.at)) or ""))
 		if s.model and s.model ~= "" then tt:AddLine("Model: " .. H.Escape(s.model)) end
 		if s.src and s.src ~= "" then tt:AddLine("Source: " .. H.Escape(s.src)) end
 		tt:AddLine(H.Escape(s.id), 0.5, 0.5, 0.5)
+		tt:AddLine("Right-click: pin, rename", 0.6, 0.6, 0.6)
 	end)
 	return b
 end
 
+-- Sessions matching the search box (title, case-insensitive), pinned ones first.
+local function FilteredSessions()
+	local all = H.Sessions()
+	local q = ui.search and ui.search:GetText():lower():gsub("^%s+", ""):gsub("%s+$", "") or ""
+	local pinned, rest = {}, {}
+	for _, s in ipairs(all) do
+		if q == "" or (s.title or ""):lower():find(q, 1, true) then
+			local into = s.pin and pinned or rest
+			into[#into + 1] = s
+		end
+	end
+	for _, s in ipairs(rest) do pinned[#pinned + 1] = s end
+	return pinned, q ~= "", #all
+end
+
+---------------------------------------------------------------------------
+-- Row menu (right-click): pin, rename, mark as read
+---------------------------------------------------------------------------
+
+local function RegisterRenamePopup()
+	StaticPopupDialogs["HERMESWOW_RENAME"] = {
+		text = "Rename this Hermes session:",
+		button1 = ACCEPT or "Accept",
+		button2 = CANCEL or "Cancel",
+		hasEditBox = 1,
+		maxLetters = 120,
+		timeout = 0,
+		whileDead = 1,
+		hideOnEscape = 1,
+		-- The target lives in ui.renaming: client versions differ in how they pass popup data.
+		OnShow = function(self)
+			local eb = self.editBox or self.EditBox
+			eb:SetText(H.Escape(ui.renaming and ui.renaming.title or ""))
+			eb:HighlightText()
+			eb:SetFocus()
+		end,
+		OnAccept = function(self)
+			local eb = self.editBox or self.EditBox
+			if ui.renaming then H.Rename(ui.renaming.sid, (eb:GetText():gsub("||", "|"))) end
+		end,
+		EditBoxOnEnterPressed = function(self)
+			if ui.renaming then H.Rename(ui.renaming.sid, (self:GetText():gsub("||", "|"))) end
+			self:GetParent():Hide()
+		end,
+		EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+	}
+end
+
+local MENU_ROW = 20
+
+local function RowMenu()
+	if ui.menu then return ui.menu end
+	local m = CreateFrame("Frame", "HermesWoWRowMenu", ui.frame, "BackdropTemplate")
+	m:SetFrameStrata("DIALOG")
+	m:SetToplevel(true)
+	m:EnableMouse(true)
+	m:SetBackdrop({
+		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true, tileSize = 16, edgeSize = 16,
+		insets = { left = 4, right = 4, top = 4, bottom = 4 },
+	})
+	m:SetBackdropColor(0, 0, 0, 0.95)
+	m.title = m:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	m.title:SetPoint("TOPLEFT", 10, -8)
+	m.title:SetPoint("RIGHT", -10, 0)
+	m.title:SetJustifyH("LEFT")
+	m.title:SetWordWrap(false)
+	m.items = {}
+	-- Close on a click anywhere else.
+	m:SetScript("OnUpdate", function(self)
+		if (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) and not self:IsMouseOver() then
+			self:Hide()
+		end
+	end)
+	m:Hide()
+	tinsert(UISpecialFrames, "HermesWoWRowMenu")
+	ui.menu = m
+	return m
+end
+
+function H.ShowRowMenu(rowButton)
+	local s = rowButton.row
+	if not s then return end
+	local m = RowMenu()
+	local entries = {
+		{ s.pin and "Unpin" or "Pin to top", function() H.Pin(s.id, not s.pin) end },
+		{ "Rename...", function()
+			ui.renaming = { sid = s.id, title = s.title }
+			StaticPopup_Show("HERMESWOW_RENAME")
+		end },
+	}
+	if H.IsUnread(s.id) then entries[#entries + 1] = { "Mark as read", function() H.MarkSeen(s.id) H.Changed() end } end
+	entries[#entries + 1] = { "Cancel", function() end }
+	m.title:SetText(H.Escape(s.title ~= "" and s.title or "Untitled"))
+	for i, e in ipairs(entries) do
+		local b = m.items[i]
+		if not b then
+			b = CreateFrame("Button", nil, m)
+			b:SetHeight(MENU_ROW)
+			b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+			b.text = b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+			b.text:SetPoint("LEFT", 6, 0)
+			b.text:SetJustifyH("LEFT")
+			m.items[i] = b
+		end
+		b:ClearAllPoints()
+		b:SetPoint("TOPLEFT", 6, -24 - (i - 1) * MENU_ROW)
+		b:SetPoint("RIGHT", -6, 0)
+		b.text:SetText(e[1])
+		b:SetScript("OnClick", function() m:Hide() e[2]() end)
+		b:Show()
+	end
+	for i = #entries + 1, #m.items do m.items[i]:Hide() end
+	m:SetSize(190, 32 + #entries * MENU_ROW)
+	m:ClearAllPoints()
+	local x, y = GetCursorPosition()
+	local scale = UIParent:GetEffectiveScale()
+	m:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / scale - 4, y / scale + 4)
+	m:Show()
+end
+
 local function RenderList()
 	local content = ui.listContent
-	local sessions = H.Sessions()
+	local sessions, searching, total = FilteredSessions()
 	ui.rows = ui.rows or {}
 	local width = ui.listScroll:GetWidth()
 	content:SetWidth(width)
@@ -271,10 +405,13 @@ local function RenderList()
 		local label = status == "running" and "|cff20ff20working|r" or (status == "waiting" and "|cffffd100needs you|r") or nil
 		b.sub:SetText((label and (label .. "  ") or "") .. s.n .. " msgs  " .. FmtAge(s.at))
 		b.badge:SetText(unread and "NEW" or "")
+		b.pin:SetShown(s.pin and true or false)
 		b:Show()
 	end
 	for i = #sessions + 1, #ui.rows do ui.rows[i]:Hide() end
 	content:SetHeight(math.max(1, #sessions * ROW_HEIGHT))
+	ui.listEmpty:SetText(searching and total > 0 and "No session title matches the search."
+		or "No sessions yet. They appear once the companion connects to Hermes.")
 	ui.listEmpty:SetShown(#sessions == 0)
 end
 
@@ -660,7 +797,8 @@ end
 local function DoSend()
 	local sid = H.db.selected
 	local text, links = H.ExpandLinks(ui.input:GetText())
-	local mid, why = H.Send(sid, text, H.ModelExtras(links), not sid and H.db.newModel or nil)
+	local shot = ui.shotCheck and ui.shotCheck:GetChecked() and true or false
+	local mid, why = H.Send(sid, text, H.ModelExtras(links), not sid and H.db.newModel or nil, { shot = shot })
 	if not mid then
 		if why == "too long" then
 			H.Print(string.format("Message too long (limit %d bytes, including linked tooltips and game info).", H.MAX_MESSAGE))
@@ -670,6 +808,56 @@ local function DoSend()
 	ui.input:SetText("")
 	H.db.drafts[sid or "new"] = nil
 	ui.input:ClearFocus()      -- give the keyboard back to the game
+	if shot then
+		ui.shotCheck:SetChecked(false)   -- one screenshot per click
+		H.HideForShot(mid)
+	end
+end
+
+-- The screenshot should show the game, not this window: hide it until the companion has
+-- taken the picture (or 10 s passed).
+function H.HideForShot()
+	if not (ui.frame and ui.frame:IsShown()) then return end
+	ui.shotHidden = true
+	ui.frame:Hide()
+	local token = {}
+	ui.shotToken = token
+	C_Timer.After(10, function() if ui.shotToken == token then H.ShotDone() end end)
+end
+
+function H.ShotDone()
+	if not ui.shotHidden then return end
+	ui.shotHidden, ui.shotToken = nil, nil
+	if not ui.combatHidden then ui.frame:Show() end
+end
+
+-- Combat: give the keyboard back, then hide or fade the window (db.combat), and hold sounds and
+-- toasts until combat ends.
+function H.OnCombat(on)
+	if not ui.frame or H.db.combat == "off" then
+		if not on and H.FlushNotify then H.FlushNotify() end
+		return
+	end
+	if on then
+		if ui.input then ui.input:ClearFocus() end
+		if ui.picker then ui.picker:Hide() end
+		if ui.menu then ui.menu:Hide() end
+		if ui.frame:IsShown() or ui.shotHidden then
+			if H.db.combat == "hide" then
+				ui.combatHidden = true
+				ui.frame:Hide()
+			else
+				ui.frame:SetAlpha(0.3)
+			end
+		end
+	else
+		ui.frame:SetAlpha(1)
+		if ui.combatHidden then
+			ui.combatHidden = nil
+			if not ui.shotHidden then ui.frame:Show() end
+		end
+		if H.FlushNotify then H.FlushNotify() end
+	end
 end
 
 local function CreateInput(f)
@@ -858,7 +1046,8 @@ end
 
 function H.Toggle()
 	if not ui.frame then return end
-	if ui.frame:IsShown() then ui.frame:Hide() else ui.frame:Show() end
+	ui.combatHidden, ui.shotHidden = nil, nil   -- the player decides now
+	if ui.frame:IsShown() then ui.frame:Hide() else ui.frame:SetAlpha(1) ui.frame:Show() end
 end
 
 function H.CreateUI()
@@ -943,8 +1132,30 @@ function H.CreateUI()
 	list:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 8, 30)
 	list:SetWidth(LIST_WIDTH)
 	ui.list = list
+	-- Search box over the list: filters the titles as you type.
+	local search = CreateFrame("EditBox", "HermesWoWSearch", list, "InputBoxTemplate")
+	search:SetAutoFocus(false)
+	search:SetHeight(20)
+	search:SetPoint("TOPLEFT", 12, -4)
+	search:SetPoint("TOPRIGHT", -8, -4)
+	search:SetMaxLetters(60)
+	search.hint = search:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	search.hint:SetPoint("LEFT", 2, 0)
+	search.hint:SetText("Search sessions")
+	search:SetScript("OnTextChanged", function(self)
+		self.hint:SetShown(self:GetText() == "" and not self:HasFocus())
+		RenderList()
+	end)
+	search:SetScript("OnEditFocusGained", function(self) self.hint:Hide() end)
+	search:SetScript("OnEditFocusLost", function(self) self.hint:SetShown(self:GetText() == "") end)
+	search:SetScript("OnEscapePressed", function(self)
+		self:SetText("")
+		self:ClearFocus()
+	end)
+	search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	ui.search = search
 	local ls = CreateFrame("ScrollFrame", "HermesWoWListScroll", list, "UIPanelScrollFrameTemplate")
-	ls:SetPoint("TOPLEFT", 4, -4)
+	ls:SetPoint("TOPLEFT", 4, -4 - SEARCH_HEIGHT)
 	ls:SetPoint("BOTTOMRIGHT", -26, 4)
 	ui.listScroll = ls
 	ui.listContent = CreateFrame("Frame", nil, ls)
@@ -992,15 +1203,21 @@ function H.CreateUI()
 	ui.stop:SetPoint("TOP", ui.send, "BOTTOM", 0, -4)
 	Tooltip(ui.stop, function(tt) tt:AddLine("Stop", 1, 1, 1) tt:AddLine("Interrupts the turn Hermes is running in this session.", nil, nil, nil, true) end)
 
+	-- Check boxes under Stop
+	local function Check(name, label, anchor)
+		local c = CreateFrame("CheckButton", name, f, "UICheckButtonTemplate")
+		c:SetSize(22, 22)
+		c:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", anchor == ui.stop and -2 or 0, anchor == ui.stop and -1 or 1)
+		local own = c.Text or c.text or _G[name .. "Text"]
+		if type(own) == "table" and own.SetText then own:SetText("") end
+		c.label = c:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+		c.label:SetPoint("LEFT", c, "RIGHT", 0, 1)
+		c.label:SetText(label)
+		return c
+	end
+
 	-- Game info toggle
-	local cb = CreateFrame("CheckButton", "HermesWoWContextCheck", f, "UICheckButtonTemplate")
-	cb:SetSize(22, 22)
-	cb:SetPoint("TOPLEFT", ui.stop, "BOTTOMLEFT", -2, -1)
-	local own = cb.Text or cb.text or _G["HermesWoWContextCheckText"]
-	if type(own) == "table" and own.SetText then own:SetText("") end
-	cb.label = cb:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	cb.label:SetPoint("LEFT", cb, "RIGHT", 0, 1)
-	cb.label:SetText("Game info")
+	local cb = Check("HermesWoWContextCheck", "Game info", ui.stop)
 	cb:SetChecked(H.db.context and true or false)
 	cb:SetScript("OnClick", function(self) H.db.context = self:GetChecked() and true or false end)
 	Tooltip(cb, function(tt)
@@ -1012,6 +1229,16 @@ function H.CreateUI()
 		end
 	end)
 	ui.contextCheck = cb
+
+	-- Screenshot with the next message (one-shot)
+	local shot = Check("HermesWoWShotCheck", "Screenshot", cb)
+	Tooltip(shot, function(tt)
+		tt:AddLine("Attach a screenshot", 1, 1, 1)
+		tt:AddLine("Sends a screenshot of the game with your next message, so Hermes can see what you see. "
+			.. "This window hides for a moment while the companion takes it. Hermes needs a model or "
+			.. "vision tool that reads images. Also: /hermes look <question>.", nil, nil, nil, true)
+	end)
+	ui.shotCheck = shot
 
 	-- Shift-click an item, spell or quest while typing in the message box to link it here.
 	-- Hermes gets the link's tooltip text with the message.
@@ -1049,6 +1276,7 @@ function H.CreateUI()
 	ui.slots = f:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
 	ui.slots:SetPoint("RIGHT", ui.reload, "LEFT", -8, 0)
 
+	RegisterRenamePopup()
 	LoadDraft()
 	f:Hide()
 end
@@ -1238,10 +1466,18 @@ end
 -- Entry point: kind = "reply" or "prompt"
 ---------------------------------------------------------------------------
 
+local deferred = {}
+
 function H.Notify(kind, sid, title, detail)
 	local cfg = H.db.notify
 	local viewing = H.IsShown() and sid == H.db.selected
 	if kind == "reply" and viewing then return end
+	if H.InCombat() then
+		-- Hold it: one summary when combat ends.
+		deferred[#deferred + 1] = { kind, sid, title, detail }
+		H.UpdateMinimap()
+		return
+	end
 	title = H.Escape(title ~= "" and title or "Untitled")
 	if cfg.sound and GetTime() - lastSound > 3 and SOUNDKIT then
 		lastSound = GetTime()
@@ -1256,6 +1492,29 @@ function H.Notify(kind, sid, title, detail)
 		end
 	end
 	H.UpdateMinimap()
+end
+
+-- After combat: the held notifications, one by one if there is a single one, else as a summary.
+function H.FlushNotify()
+	local list = deferred
+	deferred = {}
+	if #list == 1 then
+		H.Notify(unpack(list[1]))
+	elseif #list > 1 then
+		local prompt, last = false, list[#list]
+		for _, n in ipairs(list) do
+			if n[1] == "prompt" then prompt, last = true, n end
+		end
+		local cfg = H.db.notify
+		if cfg.sound and SOUNDKIT then
+			lastSound = GetTime()
+			pcall(PlaySound, prompt and SOUNDKIT.READY_CHECK or SOUNDKIT.TELL_MESSAGE, "Master")
+		end
+		if cfg.toast then
+			ShowToast(prompt and "|cffffd100Hermes needs you|r" or "Hermes", #list .. " updates while you were in combat", last[2])
+		end
+		H.UpdateMinimap()
+	end
 end
 
 function H.CreateNotify()
