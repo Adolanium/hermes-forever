@@ -1,0 +1,13 @@
+# Companion runtime state (handled record ids)
+companion/state.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
