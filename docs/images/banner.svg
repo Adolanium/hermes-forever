@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-label="HermesWoW: your Hermes Agent sessions inside World of Warcraft: Forever. Unofficial community project.">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0" stop-color="#2a1d12"/>
+      <stop offset="0.6" stop-color="#140d08"/>
+      <stop offset="1" stop-color="#070504"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff2b3"/>
+      <stop offset="0.45" stop-color="#ffd25a"/>
+      <stop offset="0.55" stop-color="#d89a1c"/>
+      <stop offset="1" stop-color="#8a5a12"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c8962e"/>
+      <stop offset="0.5" stop-color="#6e4b17"/>
+      <stop offset="1" stop-color="#c8962e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffcf5a" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffcf5a" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grain" width="6" height="6" patternUnits="userSpaceOnUse">
+      <rect width="6" height="6" fill="none"/>
+      <circle cx="1" cy="1" r="0.6" fill="#ffffff" opacity="0.025"/>
+      <circle cx="4" cy="4" r="0.5" fill="#000000" opacity="0.2"/>
+    </pattern>
+    <g id="corner" fill="none" stroke="url(#rim)" stroke-width="2.5">
+      <path d="M0 46 V8 Q8 0 16 0 H54"/>
+      <path d="M10 40 V16 Q16 10 22 10 H46"/>
+      <circle cx="10" cy="10" r="4" fill="#ffd25a" stroke="none"/>
+    </g>
+  </defs>
+
+  <rect width="1280" height="320" fill="url(#bg)"/>
+  <rect width="1280" height="320" fill="url(#grain)"/>
+
+  <!-- Frame -->
+  <rect x="14" y="14" width="1252" height="292" rx="10" fill="none" stroke="url(#rim)" stroke-width="3"/>
+  <rect x="24" y="24" width="1232" height="272" rx="6" fill="none" stroke="#6e4b17" stroke-opacity="0.6" stroke-width="1.5"/>
+  <use href="#corner" transform="translate(30 30)"/>
+  <use href="#corner" transform="translate(1250 30) scale(-1 1)"/>
+  <use href="#corner" transform="translate(30 290) scale(1 -1)"/>
+  <use href="#corner" transform="translate(1250 290) scale(-1 -1)"/>
+
+  <!-- Emblem: winged speech bubble -->
+  <g transform="translate(250 160)">
+    <circle r="120" fill="url(#glow)"/>
+    <circle r="66" fill="#1a110a" stroke="url(#rim)" stroke-width="4"/>
+    <circle r="56" fill="none" stroke="#ffd25a" stroke-opacity="0.35" stroke-width="1.5"/>
+    <g fill="url(#gold)">
+      <path d="M-14 -6 C-40 -30 -78 -34 -104 -22 C-88 -18 -76 -12 -70 -4 C-84 -6 -96 -2 -104 6 C-86 4 -72 8 -64 14 C-74 16 -82 22 -86 30 C-60 22 -34 14 -14 6 Z"/>
+      <path d="M14 -6 C40 -30 78 -34 104 -22 C88 -18 76 -12 70 -4 C84 -6 96 -2 104 6 C86 4 72 8 64 14 C74 16 82 22 86 30 C60 22 34 14 14 6 Z"/>
+      <path d="M-28 -26 H28 Q36 -26 36 -18 V14 Q36 22 28 22 H2 L-12 36 V22 H-28 Q-36 22 -36 14 V-18 Q-36 -26 -28 -26 Z"/>
+    </g>
+    <g fill="#1a110a">
+      <circle cx="-16" cy="-2" r="4.5"/>
+      <circle cx="0" cy="-2" r="4.5"/>
+      <circle cx="16" cy="-2" r="4.5"/>
+    </g>
+  </g>
+
+  <!-- Title -->
+  <g font-family="'Friz Quadrata', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif">
+    <text x="400" y="150" font-size="92" font-weight="700" fill="#000" fill-opacity="0.6" letter-spacing="2">HermesWoW</text>
+    <text x="396" y="146" font-size="92" font-weight="700" fill="url(#gold)" stroke="#3b2507" stroke-width="1.5" letter-spacing="2">HermesWoW</text>
+    <text x="400" y="196" font-size="27" fill="#e8d7b0">Your Hermes Agent sessions, inside World of Warcraft: Forever</text>
+  </g>
+
+  <!-- Unofficial tag -->
+  <g transform="translate(400 222)">
+    <rect width="372" height="38" rx="5" fill="#5a1010" stroke="#c8962e" stroke-width="1.5"/>
+    <text x="186" y="25" text-anchor="middle" font-family="Verdana, 'Segoe UI', Arial, sans-serif" font-size="15" font-weight="700" fill="#ffe7a6" letter-spacing="2.5">UNOFFICIAL COMMUNITY PROJECT</text>
+  </g>
+</svg>

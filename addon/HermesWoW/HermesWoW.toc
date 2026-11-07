@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: HermesWoW
-## Notes: Talk to your local Hermes Agent sessions while you play. Needs the HermesWoW companion (see README).
+## Notes: Unofficial community addon: talk to your local Hermes Agent sessions while you play. Needs the HermesWoW companion (see README).
 ## Author: Adolanium
 ## Version: 1.0.0
 ## SavedVariables: HermesWoWDB

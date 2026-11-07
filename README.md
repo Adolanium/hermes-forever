@@ -1,4 +1,22 @@
-# HermesWoW
+<p align="center">
+  <img src="docs/images/banner.svg" alt="HermesWoW: your Hermes Agent sessions, inside World of Warcraft: Forever. Unofficial community project." width="100%">
+</p>
+
+<p align="center">
+  <img alt="Unofficial community project" src="https://img.shields.io/badge/status-unofficial%20community%20project-8b1a1a?style=for-the-badge">
+  <img alt="Client: WoW Forever, Interface 16001" src="https://img.shields.io/badge/client-WoW%20Forever%20·%2016001-c8962e?style=for-the-badge">
+  <img alt="Works with Hermes Agent" src="https://img.shields.io/badge/works%20with-Hermes%20Agent-3b2507?style=for-the-badge">
+  <br>
+  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
+  <img alt="Lua 5.1" src="https://img.shields.io/badge/addon-Lua%205.1-2C2D72?style=flat-square&logo=lua&logoColor=white">
+  <img alt="Python" src="https://img.shields.io/badge/companion-Python-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square">
+</p>
+
+> [!IMPORTANT]
+> **HermesWoW is an unofficial, fan-made community project.** It is not affiliated with,
+> endorsed by, sponsored by or supported by Blizzard Entertainment, Nous Research or the Hermes
+> Agent project. See [Disclaimer](#disclaimer).
 
 Talk to your local [Hermes Agent](https://github.com/NousResearch/hermes-agent) sessions from
 inside World of Warcraft: Forever.
@@ -6,6 +24,12 @@ inside World of Warcraft: Forever.
 Type `/hermes` in game. A window lists your Hermes sessions and shows their history. You can
 continue a session, start a new one, stop running work and answer Hermes's questions while the
 game keeps running.
+
+<p align="center">
+  <img src="docs/images/window.png" alt="The HermesWoW window in game: session list on the left, a Hermes conversation on the right, message box and Send and Stop buttons at the bottom." width="760">
+  <br>
+  <sub>A Hermes reply in game, rendered from Markdown with the client's own frames, fonts and buttons.</sub>
+</p>
 
 ## Features
 
@@ -68,6 +92,23 @@ The pixel-strip codec and transport design come from
 [wow-ai](https://github.com/chelinho139/wow-ai) (MIT). See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+## Disclaimer
+
+HermesWoW is an unofficial, fan-made community project, built and maintained independently.
+
+- It is **not** affiliated with, endorsed by, sponsored by or supported by **Blizzard
+  Entertainment**. World of Warcraft and Blizzard Entertainment are trademarks or registered
+  trademarks of Blizzard Entertainment, Inc. in the U.S. and other countries.
+- It is **not** affiliated with, endorsed by, sponsored by or supported by **Nous Research** or
+  the **Hermes Agent** project. Hermes Agent is a project of Nous Research.
+- Names are used only to say what HermesWoW works with. This repository contains no game files,
+  no Blizzard art and no Nous Research logos. The banner and emblem are original work.
+- HermesWoW uses only the normal addon API in game: no memory reading, no injection, no
+  automation of gameplay. You use it at your own risk and are responsible for following the
+  rules of the game and server you play on.
+- Please send questions and bug reports about HermesWoW to this repository's
+  [issues](https://github.com/Adolanium/hermes-forever/issues), not to Blizzard or Nous Research.
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Third-party code: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
