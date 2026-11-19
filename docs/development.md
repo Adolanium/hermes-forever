@@ -13,7 +13,7 @@ companion/
   capture_linux.py read-only X11/XWayland capture and exact client/process selection
   instance_lock.py one companion per AddOns folder (flock / Windows byte-range lock)
   install.py       copies the addon, creates slot addons and signal files
-  start_linux.py   starts the companion with the installed Hermes managed runtime
+  start_linux.py   installs with --install, or starts with the installed Hermes managed runtime
   start.ps1        finds Hermes's Python, installs or runs the companion
   start.cmd        double-click launcher for start.ps1
 docs/              user and developer documentation
@@ -26,6 +26,7 @@ tests/
   format_test.py   Markdown rendering (offline)
   notify_test.py   sounds, toasts and minimap badge (offline)
   ui_test.py       search, pin, rename, quick questions, screenshot, combat (offline)
+  setup_test.py    disconnected status and local /hermes setup guidance (offline)
 ```
 
 `UI.lua` stays one file on purpose. The client indexes addon files only at launch, so a new
@@ -86,7 +87,14 @@ separate disposable environment if your Hermes runtime does not include it:
 python3 -B tests/format_test.py
 python3 -B tests/notify_test.py
 python3 -B tests/ui_test.py
+python3 -B tests/setup_test.py
 ```
+
+`setup_test.py` runs the actual addon Lua without a gateway and checks Linux and
+Windows help for missing/stale companions and missing reply slots. Launcher tests
+also run `start_linux.py --install` in a synthetic client with no Hermes/display,
+including a repeat install and an invalid target. No packages or services are
+installed by these tests.
 
 `--inject` is now explicitly display-free on all platforms: it does not create
 a native capture backend. It is for simulator input only, not normal play.

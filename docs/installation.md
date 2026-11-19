@@ -53,6 +53,11 @@ prints what it does. In the game, type `/hermes` to open or close the window.
 
 ## Linux / Wine / Proton
 
+For the short path, use [Linux quick setup](linux-setup.md): one script with
+`--install` once, then the same script without it while playing. That page also
+has instructions to give your own Hermes, and explains `/hermes setup` in game.
+No `pip`, virtualenv, service or package setup is part of this workflow.
+
 The Linux companion uses libX11 through Python's standard-library `ctypes`; it
 adds no Python capture packages. It supports Wine/Proton windows running on X11
 or XWayland, including a KDE Wayland desktop when the game itself uses XWayland.
@@ -61,10 +66,10 @@ run as your desktop user with that session's `DISPLAY` and `XAUTHORITY`.
 
 The Linux launcher requires a managed Hermes installation whose
 `hermes --print-runtime-command` reports its interpreter. From a checkout,
-install the unchanged Lua addon and its predeclared reply slots:
+install the Lua addon and its predeclared reply slots (with WoW closed):
 
 ```sh
-python3 companion/install.py --addons '/path/to/World of Warcraft/_forever_/Interface/AddOns'
+python3 companion/start_linux.py --install --addons '/path/to/World of Warcraft/_forever_/Interface/AddOns'
 ```
 
 Then fully restart the client. Run the companion with the installed Hermes

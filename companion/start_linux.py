@@ -5,6 +5,7 @@ Example:
   python3 companion/start_linux.py --addons '/path/to/_forever_/Interface/AddOns'
 
 No dependency installation, daemon restart, or gameplay input is performed.
+Use --install once to install/refresh the addon and exit without starting Hermes.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 
 def resolve_python(hermes: str, *, run=subprocess.run) -> str:
@@ -49,11 +51,25 @@ hermeswow.main()
 
 
 def main():
-    parser = argparse.ArgumentParser(description=(__doc__ or "Start HermesWoW").splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "Start HermesWoW").splitlines()[0],
+                                     epilog="Install once with --install, fully restart WoW, then run without --install.")
+    parser.add_argument("--install", action="store_true", help="install/refresh the addon and reply slots, then exit")
     parser.add_argument("--hermes", default=os.environ.get("HERMES_BIN") or shutil.which("hermes"))
     parser.add_argument("--hermes-agent", type=Path,
                         default=Path(os.environ.get("HERMES_AGENT_DIR") or Path.home() / ".hermes/hermes-agent"))
     options, rest = parser.parse_known_args()
+    companion = Path(__file__).resolve().parent
+    if options.install:
+        # Installing the Lua files needs only stdlib Python, not a running
+        # gateway, a display or a provisioned Hermes interpreter.
+        try:
+            result = subprocess.run([sys.executable, "-B", str(companion / "install.py"), *rest], check=False)
+        except OSError as exc:
+            parser.exit(2, f"Cannot run the addon installer: {exc}\n")
+        if result.returncode == 0:
+            print("Next: fully restart WoW, then run the same command without --install. "
+                  "Leave that terminal open while playing; /hermes setup shows help in game.")
+        parser.exit(result.returncode)
     if not options.hermes:
         parser.error("Hermes was not found; pass --hermes /path/to/hermes")
     agent = options.hermes_agent.resolve()
@@ -63,7 +79,6 @@ def main():
         python = resolve_python(options.hermes)
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         parser.exit(2, f"{exc}\n")
-    companion = Path(__file__).resolve().parent
     command = companion_command(python, agent, companion, ["--hermes-agent", str(agent), *rest])
     os.execv(command[0], command)
 

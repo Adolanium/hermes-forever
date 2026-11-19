@@ -106,6 +106,69 @@ class LinuxLauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--hermes-agent", result.stdout)
 
+    def test_install_flag_works_without_hermes_or_display(self):
+        # The public Linux entrypoint must install without resolving a runtime
+        # or opening a gateway. The client and HOME are owned by this fixture.
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as folder:
+            root = Path(folder)
+            client = root / "game with spaces" / "_forever_"
+            addons = client / "Interface" / "AddOns"
+            addons.mkdir(parents=True)
+            (client / "Wow.exe").write_bytes(b"fixture, never executed")
+            env = {"PATH": str(root / "no-executables"), "HOME": str(root),
+                   "TMPDIR": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
+            cmd = [sys.executable, "-B", str(TARGET), "--install", "--addons", str(addons)]
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(list(addons.glob("HermesWoW_S[0-9][0-9][0-9]"))), 200)
+            self.assertIn("restart", result.stdout.lower())
+            self.assertFalse((root / ".hermes").exists())
+            self.assertFalse((addons / ".hermeswow.lock").exists())
+            for source in (ROOT / "addon/HermesWoW").iterdir():
+                if source.is_file():
+                    self.assertEqual((addons / "HermesWoW" / source.name).read_bytes(), source.read_bytes())
+            # Re-running the same command must not erase queued reply data or
+            # SavedVariables; no daemon or package installation is involved.
+            slot = addons / "HermesWoW_S001" / "Inbox.lua"
+            slot.write_text("HermesWoW_Inbox = {fixture=true}\n")
+            saved = client / "WTF" / "SavedVariables.lua"
+            saved.parent.mkdir()
+            saved.write_text("fixture = true\n")
+            again = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertEqual(slot.read_text(), "HermesWoW_Inbox = {fixture=true}\n")
+            self.assertEqual(saved.read_text(), "fixture = true\n")
+
+    def test_install_flag_propagates_invalid_client_failure_without_hermes(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as folder:
+            root = Path(folder)
+            addons = root / "not-a-client" / "Interface" / "AddOns"
+            addons.mkdir(parents=True)
+            result = subprocess.run(
+                [sys.executable, "-B", str(TARGET), "--install", "--addons", str(addons)],
+                env={"PATH": str(root / "empty"), "HOME": str(root), "TMPDIR": str(root)},
+                capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no Wow.exe", result.stderr)
+            self.assertFalse((addons / "HermesWoW").exists())
+
+    def test_install_flag_does_not_swallow_startup_arguments(self):
+        # Normal startup must still forward addons and state unchanged.
+        from unittest.mock import patch
+        module = self.load()
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as folder:
+            agent = Path(folder)
+            (agent / "hermes_bootstrap.py").write_text("# fixture\n")
+            argv = [str(TARGET), "--hermes", "/fixture/hermes", "--hermes-agent", str(agent),
+                    "--addons", "/game with spaces/AddOns", "--state", "/private/state.json"]
+            with patch.object(sys, "argv", argv), \
+                    patch.object(module, "resolve_python", return_value="/fixture/python"), \
+                    patch.object(module.os, "execv") as execute:
+                module.main()
+            command = execute.call_args.args[1]
+            self.assertEqual(command[7:], ["--hermes-agent", str(agent), "--addons",
+                                          "/game with spaces/AddOns", "--state", "/private/state.json"])
+
     def test_source_install_into_synthetic_client_preserves_lua(self):
         # Characterization: never write to the installed game; installer remains
         # byte-identical to upstream and is exercised with a synthetic client.

@@ -438,13 +438,14 @@ function H.Status()
 	local level, text = "ok", "Connected"
 	if run.slotsBroken then
 		level, text = "error", "Reply slots unavailable (" .. run.slotsBroken .. ")"
-		detail[#detail + 1] = "Run companion\\install.py, enable the HermesWoW slot addons and restart the game."
+		detail[#detail + 1] = "Run companion/install.py, enable the HermesWoW slot addons and restart the game. /hermes setup shows commands."
 	elseif not run.inbox and not run.companionSeen then
 		level, text = "error", "Companion not running"
-		detail[#detail + 1] = "Start companion\\start.ps1 (see README)."
+		detail[#detail + 1] = "Linux: run python3 companion/start_linux.py --addons <your AddOns path> outside WoW."
+		detail[#detail + 1] = "Windows: run companion/start.ps1. Type /hermes setup for installation help."
 	elseif now - seen > window then
 		level, text = "error", "Companion not responding"
-		detail[#detail + 1] = string.format("Last heard %d s ago. Is start.ps1 still running?", now - seen)
+		detail[#detail + 1] = string.format("Last heard %d s ago. Keep the companion terminal open. /hermes setup shows commands.", now - seen)
 	else
 		local gw = run.inbox and run.inbox.gw or {}
 		if gw.state == "offline" then
@@ -892,6 +893,13 @@ SlashCmdList.HERMESWOW = function(raw)
 		local mode = rest:lower()
 		if COMBAT_MODES[mode] then db.combat = mode end
 		H.Print("combat mode: " .. db.combat .. " - " .. COMBAT_MODES[db.combat] .. ".")
+	elseif msg == "setup" then
+		H.Print("The companion runs outside WoW. In a terminal at the repository root, replace the example path with your actual AddOns folder.")
+		H.Print('Linux first install: python3 companion/start_linux.py --install --addons "/path/to/_forever_/Interface/AddOns"')
+		H.Print('Linux while playing: python3 companion/start_linux.py --addons "/path/to/_forever_/Interface/AddOns"')
+		H.Print("Windows: companion/start.ps1 -Install once, then companion/start.ps1 while playing.")
+		H.Print("Fully restart WoW after the first install. Leave the companion terminal open while playing.")
+		H.Print("Ask your Hermes to follow docs/linux-setup.md in this repository. No sudo or pip needed; the addon cannot start programs.")
 	elseif msg == "status" then
 		local level, text, detail = H.Status()
 		H.Print(text .. " (" .. level .. ")")
@@ -912,6 +920,7 @@ SlashCmdList.HERMESWOW = function(raw)
 		H.Print("/hermes ask <question> - ask without opening the window; the reply appears in chat")
 		H.Print("/hermes look <question> - the same, with a screenshot of the game")
 		H.Print("/hermes combat hide | fade | off - what the window does in combat")
+		H.Print("/hermes setup - installation and companion launch help (Linux/Windows)")
 		H.Print("/hermes status | refresh | reset | minimap | sound on/off | toast on/off")
 	else
 		if H.Toggle then H.Toggle() end

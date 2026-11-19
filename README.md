@@ -63,9 +63,9 @@ through a strip of colored pixels on screen and through files the game loads. Se
 
 ## Quick start
 
-For Linux with Wine/Proton on X11/XWayland, follow the
-[Linux installation instructions](docs/installation.md#linux--wine--proton).
-Native Wayland game windows are not supported.
+[Linux quick setup](docs/linux-setup.md) has the two install/start commands and
+instructions you can give your own Hermes to help with installation. The game
+must use X11/XWayland; native Wayland game windows are not supported.
 
 On Windows, you need the Forever client in windowed or borderless mode and Hermes Agent from the
 standard Windows installer.
@@ -88,6 +88,7 @@ standard Windows installer.
 
 ## Documentation
 
+- [Linux quick setup](docs/linux-setup.md): install/start with one script, plus instructions for your Hermes.
 - [Installation](docs/installation.md): requirements, install, start, update.
 - [Usage](docs/usage.md): the window, links, game info, notifications, slash commands.
 - [How it works](docs/how-it-works.md): transport, limits, reload rules, reliability.
