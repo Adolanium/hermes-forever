@@ -9,8 +9,11 @@ addon/HermesWoW/
   HermesWoW.lua    state, transport, inbox handling, game context, slash commands
   UI.lua           window, Markdown rendering, model picker, notifications
 companion/
-  hermeswow.py     screen capture, decoder, slot writer, doorbells, Hermes gateway client
+  hermeswow.py     decoder, slot writer, doorbells, Hermes gateway client; Windows GDI capture
+  capture_linux.py read-only X11/XWayland capture and exact client/process selection
+  instance_lock.py one companion per AddOns folder (flock / Windows byte-range lock)
   install.py       copies the addon, creates slot addons and signal files
+  start_linux.py   starts the companion with the installed Hermes managed runtime
   start.ps1        finds Hermes's Python, installs or runs the companion
   start.cmd        double-click launcher for start.ps1
 docs/              user and developer documentation
@@ -53,6 +56,45 @@ calls:
   its id. Delete it afterwards with `hermes sessions delete <id>`.
 - In test mode the companion has no game window. Its "screenshot" is a 64x64 test image: a blue
   square on red.
+
+## Linux port tests
+
+The platform selection, capture, instance-lock and launcher tests use only
+Python's standard library. Run them on Linux without the game or gateway:
+
+```sh
+python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+The default run does not capture your display. An opt-in X11 integration test
+creates and reads only its own small synthetic window, then destroys it:
+
+```sh
+HERMESWOW_TEST_DISPLAY="$DISPLAY" python3 -B -m unittest discover -s tests -p 'test_capture_linux.py' -v
+```
+
+This checks libX11 conversion, unmapping and destroyed-window handling; it does
+not exercise a real game. Other tests use synthetic process metadata or harmless
+owned child processes to check process identity and lock release after exit.
+Windows backend selection and byte-range lock calls are covered with doubles on
+Linux; they are not a native Windows game test.
+
+The existing Lua offline suites still require `lupa` with Lua 5.1. Run them in a
+separate disposable environment if your Hermes runtime does not include it:
+
+```sh
+python3 -B tests/format_test.py
+python3 -B tests/notify_test.py
+python3 -B tests/ui_test.py
+```
+
+`--inject` is now explicitly display-free on all platforms: it does not create
+a native capture backend. It is for simulator input only, not normal play.
+Linux backend tests replace X11 and process metadata at the external IO boundary;
+a passing synthetic suite is not proof that a real Wine/Proton window is
+capturable. Keep a real-window check and an actual in-game message round trip as
+separate acceptance steps. Never point a live test at an unrelated existing
+conversation; create a named technical-test session instead.
 
 ## Not covered by tests
 
