@@ -1,6 +1,6 @@
 """HermesWoW companion: connects the HermesWoW addon to the local Hermes gateway.
 
-Run it with Hermes's own Python (start.ps1 finds it). It attaches to the running Hermes
+Run it with Hermes's own Python (start.ps1 or start_linux.py finds it). It attaches to the running Hermes
 gateway the same way Hermes Desktop does (hermes_cli.gateway_client.connect_gateway, a
 same-user ticket from the gateway's local control socket), so every turn runs inside the
 gateway's own agent with your profile's model, tools and approval rules. It never starts an
@@ -236,6 +236,12 @@ class Capture:
         self.hwnd, self.pid = found[0] if found else (None, None)
         return self.hwnd
 
+    def close(self):
+        self.hwnd = self.pid = None
+
+    def is_window(self):
+        return bool(self.hwnd and self.user32.IsWindow(self.hwnd))
+
     def grab(self):
         """BGRA bytes of the client area's top-left strip region, or None."""
         return self._grab(self.width, self.height, CELL * 8, CELL)
@@ -281,6 +287,45 @@ class Capture:
             self.user32.ReleaseDC(0, screen)
 
 
+class InjectCapture:
+    """The explicit simulator input has no native display to discover or capture."""
+    hwnd = pid = None
+
+    def find(self):
+        return None
+
+    def is_window(self):
+        return False
+
+    def grab(self):
+        return None
+
+    def grab_full(self):
+        return None
+
+    def close(self):
+        pass
+
+
+def make_capture(client_dir: Path, *, inject=False):
+    if inject:
+        return InjectCapture()
+    if sys.platform.startswith("linux"):
+        from capture_linux import Capture as LinuxCapture
+        return LinuxCapture(client_dir)
+    if sys.platform == "win32":
+        return Capture(client_dir)
+    raise RuntimeError("HermesWoW capture supports Windows or Linux X11/XWayland")
+
+
+def default_hermes_agent() -> Path:
+    if os.environ.get("HERMES_AGENT_DIR"):
+        return Path(os.environ["HERMES_AGENT_DIR"])
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "hermes-agent"
+    return Path.home() / ".hermes" / "hermes-agent"
+
+
 def encode_png(bgra: bytes, w: int, h: int) -> bytes:
     """Top-down BGRA pixels -> an RGB PNG file."""
     rgb = bytearray(w * h * 3)
@@ -294,12 +339,12 @@ def encode_png(bgra: bytes, w: int, h: int) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b"")
 
 
-def decode_strip(buf: bytes, w: int, h: int):
+def decode_strip(buf: bytes, w: int, h: int, *, pitch: float = CELL, offset: float = 0):
     """Decode one frame drawn by Codec.lua. Returns (id, payload bytes), ("error", why) or None."""
-    cols = min(CELLS_PER_ROW, w // CELL)
-    rows = min(MAX_ROWS, h // CELL)
+    cols = min(CELLS_PER_ROW, int(w / pitch))
+    rows = min(MAX_ROWS, int(h / pitch))
     total = cols * rows
-    half = CELL // 2
+    half = pitch / 2
     acc = nbits = 0
     out = bytearray()
     needed = 6
@@ -307,7 +352,10 @@ def decode_strip(buf: bytes, w: int, h: int):
         c, r = i % CELLS_PER_ROW, i // CELLS_PER_ROW
         if c >= cols:
             return ("error", "window narrower than the strip")
-        o = ((r * CELL + half) * w + c * CELL + half) * 4
+        x, y = int(c * pitch + half + offset), int(r * pitch + half)
+        if not (0 <= x < w and 0 <= y < h):
+            return ("error", "bounds")
+        o = (y * w + x) * 4
         bb, gg, rr = buf[o], buf[o + 1], buf[o + 2]
         v = (4 if rr >= 128 else 0) | (2 if gg >= 128 else 0) | (1 if bb >= 128 else 0)
         acc = (acc << 3) | v
@@ -335,6 +383,20 @@ def decode_strip(buf: bytes, w: int, h: int):
     if (out[6 + length], out[7 + length]) != (s1, s2):
         return ("error", "checksum")
     return (out[2] * 256 + out[3], bytes(out[6:6 + length]))
+
+
+def decode_scaled_strip(buf: bytes, w: int, h: int):
+    """Try bounded desktop-scale candidates; only a valid Fletcher frame is accepted."""
+    if len(buf) != w * h * 4:
+        return None
+    # Most games use 4 physical pixels. XWayland/Proton can apply 80%, 125%,
+    # 133%, 150%, 175% or 200% display scaling to the addon surface.
+    for pitch in (4, 16 / 3, 5, 6, 3.2, 7, 8, 10 / 3):
+        for offset in (0, -1, 1):
+            result = decode_strip(buf, w, h, pitch=pitch, offset=offset)
+            if result and result[0] != "error":
+                return result
+    return None
 
 
 def parse_frame(payload: bytes):
@@ -408,7 +470,8 @@ class Companion:
         self.addons = Path(args.addons).resolve()
         self.sig_dir = self.addons / "HermesWoW" / "sig"
         self.store = Store(Path(args.state))
-        self.capture = Capture(self.addons.parent.parent)
+        self.capture = make_capture(self.addons.parent.parent, inject=bool(args.inject))
+        self.capture_stop = threading.Event()
         self.client = None
         self.gw = {"state": "connecting", "detail": ""}
         self.sessions: list[dict] = []
@@ -563,10 +626,10 @@ class Companion:
         last_find = 0.0
         last_beat = 0.0
         cap = self.capture
-        while True:
+        while not self.capture_stop.is_set():
             try:
                 now = time.monotonic()
-                if not cap.hwnd or not cap.user32.IsWindow(cap.hwnd):
+                if not cap.is_window():
                     if now - last_find > 3:
                         last_find = now
                         if cap.find():
@@ -577,9 +640,10 @@ class Companion:
                 if now - last_beat >= BEAT_SECONDS:
                     last_beat = now
                     loop.call_soon_threadsafe(self.ring, "h")
-                grabbed = cap.grab()
+                scaled = getattr(cap, "grab_scaled", None)
+                grabbed = scaled() if scaled else cap.grab()
                 if grabbed:
-                    res = decode_strip(*grabbed)
+                    res = decode_scaled_strip(*grabbed) if scaled else decode_strip(*grabbed)
                     if res:
                         self.strip_at = now
                     if res and res[0] == "error":
@@ -603,7 +667,7 @@ class Companion:
         """Test input: hex-encoded strip payloads appended to a file, one per line."""
         pos = 0
         last_beat = 0.0
-        while True:
+        while not self.capture_stop.is_set():
             now = time.monotonic()
             if now - last_beat >= BEAT_SECONDS:
                 last_beat = now
@@ -1280,45 +1344,68 @@ class Companion:
             log.error("signal files missing under %s: run install.py first", self.sig_dir)
             sys.exit(2)
         loop = asyncio.get_running_loop()
-        if self.args.inject:
-            threading.Thread(target=self.inject_thread, args=(loop, Path(self.args.inject)), daemon=True).start()
-        else:
-            threading.Thread(target=self.capture_thread, args=(loop,), daemon=True).start()
-        self.wake_jobs()
-        self.prune_shots()
-        log.info("HermesWoW companion: %d slots, addons at %s", len(self.slot_files), self.addons)
-        await asyncio.gather(self.gateway_loop(), self.record_loop(), self.publisher(), self.job_loop(),
-                             self.list_ticker())
+        target = self.inject_thread if self.args.inject else self.capture_thread
+        args = (loop, Path(self.args.inject)) if self.args.inject else (loop,)
+        reader = threading.Thread(target=target, args=args, daemon=True)
+        reader.start()
+        tasks = []
+        try:
+            self.wake_jobs()
+            self.prune_shots()
+            log.info("HermesWoW companion: %d slots, addons at %s", len(self.slot_files), self.addons)
+            tasks = [asyncio.create_task(fn()) for fn in (
+                self.gateway_loop, self.record_loop, self.publisher, self.job_loop, self.list_ticker)]
+            await asyncio.gather(*tasks)
+        finally:
+            self.capture_stop.set()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            shots = list(self.shot_tasks.values())
+            if shots:
+                await asyncio.gather(*shots, return_exceptions=True)
+            await asyncio.to_thread(reader.join, 5)
+            if reader.is_alive():
+                log.warning("capture reader did not stop; leaving its display for process cleanup")
+            else:
+                self.capture.close()
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     default_addons = HERE.parent.parent
     ap.add_argument("--addons", default=str(default_addons), help="Interface\\AddOns folder of the Forever client")
-    ap.add_argument("--hermes-agent", default=os.environ.get("HERMES_AGENT_DIR") or
-                    str(Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "hermes-agent"))
+    ap.add_argument("--hermes-agent", default=str(default_hermes_agent()))
     ap.add_argument("--state", default=str(HERE / "state.json"), help=argparse.SUPPRESS)
     ap.add_argument("--inject", help=argparse.SUPPRESS)  # tests: read strip payloads from a file
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s.%(msecs)03d %(levelname)s %(message)s", datefmt="%H:%M:%S")
-    # Import Hermes's client from the same checkout the running gateway uses.
-    sys.path.insert(0, args.hermes_agent)
+    from instance_lock import AlreadyRunningError, InstanceLock
     try:
-        # Imported up front, on this thread: importing Hermes modules from worker threads while the
-        # event loop imports others can deadlock on Python's per-module import locks.
-        import hermes_cli.gateway_client  # noqa: F401
-        import hermes_cli.web_server_sessions  # noqa: F401
-        import websockets.protocol  # noqa: F401
-        import gateway.platforms.base  # noqa: F401
-    except ImportError as exc:
-        log.error("cannot import Hermes (%s). Start this with start.ps1, which uses Hermes's Python.", exc)
+        instance_lock = InstanceLock(args.addons).acquire()
+    except (AlreadyRunningError, OSError) as exc:
+        log.error("cannot start HermesWoW companion: %s", exc)
         sys.exit(2)
-    try:
-        asyncio.run(Companion(args).main())
-    except KeyboardInterrupt:
-        pass
+    with instance_lock:
+        # Import Hermes's client from the same checkout the running gateway uses.
+        sys.path.insert(0, args.hermes_agent)
+        try:
+            # Imported up front, on this thread: importing Hermes modules from worker threads while the
+            # event loop imports others can deadlock on Python's per-module import locks.
+            import hermes_cli.gateway_client  # noqa: F401
+            import hermes_cli.web_server_sessions  # noqa: F401
+            import websockets.protocol  # noqa: F401
+            import gateway.platforms.base  # noqa: F401
+        except ImportError as exc:
+            log.error("cannot import Hermes (%s). Start this with start.ps1 or start_linux.py, "
+                      "which uses Hermes's Python.", exc)
+            sys.exit(2)
+        try:
+            asyncio.run(Companion(args).main())
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

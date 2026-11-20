@@ -8,6 +8,7 @@
   <img alt="Works with Hermes Agent" src="https://img.shields.io/badge/works%20with-Hermes%20Agent-3b2507?style=for-the-badge">
   <br>
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
+  <img alt="Linux: X11/XWayland" src="https://img.shields.io/badge/Linux-X11%2FXWayland-FCC624?style=flat-square&logo=linux&logoColor=black">
   <img alt="Lua 5.1" src="https://img.shields.io/badge/addon-Lua%205.1-2C2D72?style=flat-square&logo=lua&logoColor=white">
   <img alt="Python" src="https://img.shields.io/badge/companion-Python-3776AB?style=flat-square&logo=python&logoColor=white">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square">
@@ -62,7 +63,11 @@ through a strip of colored pixels on screen and through files the game loads. Se
 
 ## Quick start
 
-You need Windows, the Forever client in windowed or borderless mode, and Hermes Agent from the
+[Linux quick setup](docs/linux-setup.md) has the two install/start commands and
+instructions you can give your own Hermes to help with installation. The game
+must use X11/XWayland; native Wayland game windows are not supported.
+
+On Windows, you need the Forever client in windowed or borderless mode and Hermes Agent from the
 standard Windows installer.
 
 1. Clone this repository into `Interface\AddOns\hermes-forever`.
@@ -83,6 +88,7 @@ standard Windows installer.
 
 ## Documentation
 
+- [Linux quick setup](docs/linux-setup.md): install/start with one script, plus instructions for your Hermes.
 - [Installation](docs/installation.md): requirements, install, start, update.
 - [Usage](docs/usage.md): the window, links, game info, notifications, slash commands.
 - [How it works](docs/how-it-works.md): transport, limits, reload rules, reliability.

@@ -13,3 +13,16 @@
   textures. The slot files are plain Lua data tables.
 - **Local readability.** Other programs that run as you can read the slot files, like the rest
   of your Hermes data.
+- **Linux capture scope.** Only a viewable X11/XWayland window belonging to the configured
+  client's `Wow.exe` is eligible. Selection checks same-user process identity and generation,
+  not a window title. The normal reader captures at most 1600×384 pixels from its top-left
+  corner for display scaling; a whole-window capture requires a screenshot request. No
+  desktop/root-window capture or keyboard/mouse input is used. X11 PID properties do not
+  authenticate malicious local clients, and this is not a security boundary against
+  another program running as you.
+- **Single companion ownership.** Updated companions hold an OS-backed file lock for their
+  AddOns folder before loading state, capture or gateway code. The persistent lock
+  file contains no credentials (empty on POSIX, one NUL byte on Windows). This prevents
+  cooperating instances racing slot/state files; it does not fence older companions
+  or protect a state file deliberately shared
+  by different AddOns folders. Use a separate `--state` file for each installation.

@@ -118,6 +118,7 @@ works. The icon turns grey when the connection has a problem.
 | `/hermes ask <question>` | Ask without opening the window; the reply appears in chat. |
 | `/hermes look <question>` | The same, with a screenshot of the game. |
 | `/hermes combat hide` or `fade` or `off` | Choose what the window does in combat. |
+| `/hermes setup` | Print Linux/Windows install and launch help locally, even without a companion. |
 | `/hermes status` | Print diagnostics. |
 | `/hermes refresh` | Ask for a fresh session list. |
 | `/hermes reset` | Move the window back to the center. |

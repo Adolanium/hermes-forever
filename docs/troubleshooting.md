@@ -4,12 +4,19 @@
 
 | Status bar | What to do |
 |---|---|
-| Companion not running | Start `companion\start.ps1`. |
-| Companion not responding | Check the companion window for errors. It restarts itself after a crash. |
+| Companion not running | Linux: run `python3 companion/start_linux.py --addons '<your AddOns path>'` from the repository root. Windows: run `companion\start.ps1`. `/hermes setup` shows help in game. |
+| Companion not responding | Check that the companion terminal is still open and read its errors. On Linux, re-run the launch command if it exited; only the Windows PowerShell launcher restarts it automatically. |
 | Hermes gateway offline | Hover for the reason. Run `hermes gateway status`, or start Hermes Desktop. |
-| Reply slots unavailable | Run `start.ps1 -Install`, enable the slot addons and restart the game. |
+| Reply slots unavailable | Close the game. Linux: run the launcher with `--install --addons '<your AddOns path>'`. Windows: `start.ps1 -Install`. Enable the slot addons and fully restart the game. |
 | Reload needed | Click **Reload UI**. |
 | Doorbells off (tooltip) | Turn on Sound > Master. If you just installed, restart the game. |
+
+## Linux quick help
+
+See [Linux quick setup](linux-setup.md) for the two commands or the instructions
+to give your own Hermes. `/hermes setup` prints help without a live bridge;
+`/hermes status` prints the current connection details. Run terminal commands
+outside the game, not in WoW chat. The addon cannot start the companion itself.
 
 ## Records stay "pending"
 
