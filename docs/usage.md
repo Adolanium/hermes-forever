@@ -55,9 +55,10 @@ you choose a destination, and the session already selected in HermesWoW stays se
 The button is also available in the separate quest details popup. The reply appears in game
 chat, or in the conversation if you already have the destination open.
 
-The button sends only the displayed quest's name, ID, objectives, progress and completion
-status, plus your current zone and player coordinates when available. It does not send a
-screenshot or your full quest log, regardless of the **Game info** and **Screenshot** settings.
+The button sends the displayed quest's name, ID, objectives, progress and completion status,
+plus your character's level, class, race, faction, current zone and coordinates when available.
+It does not send your character name, realm, a screenshot or your full quest log, regardless
+of the **Game info** and **Screenshot** settings.
 
 ## Screenshots
 

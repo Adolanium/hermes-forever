@@ -17,6 +17,12 @@ QUEST_API = """
 function GetLocale() return 'esES' end
 function GetRealZoneText() return 'Bosque de Elwynn' end
 function GetSubZoneText() return 'Villadorada' end
+function UnitLevel(unit) if unit == 'player' then return 23 end end
+function UnitClass(unit) if unit == 'player' then return 'Cazador', 'HUNTER' end end
+function UnitRace(unit) if unit == 'player' then return 'Enano', 'Dwarf' end end
+function UnitFactionGroup(unit) if unit == 'player' then return 'Alliance', 'Alianza' end end
+function UnitName() return 'PrivateCharacter' end
+function GetRealmName() return 'PrivateRealm' end
 
 C_Map = {
     GetBestMapForUnit = function(unit) assert(unit == 'player'); return 37 end,
@@ -242,7 +248,7 @@ class QuestButtonTest(unittest.TestCase):
         self.assertIn('Colmillos del bosque', text)
         for value in ['42', 'Colmillos', '3/8', 'vigía', 'complete', 'Bosque de Elwynn', 'Villadorada', '42.0, 65.7']:
             self.assertIn(value, extra)
-        for value in ['Entrega en Villadorada', '|cff', 'Quest log:', 'Character:']:
+        for value in ['Entrega en Villadorada', '|cff', 'Quest log:', 'PrivateCharacter', 'PrivateRealm']:
             self.assertNotIn(value, extra)
         self.assertEqual(self.g.objectiveReads, 1)
         self.assertFalse(self.H.IsShown(), 'do not open a second window over the quest')
@@ -279,6 +285,8 @@ class QuestButtonTest(unittest.TestCase):
         (method, request), = requests
         self.assertEqual((method, request['session_id'], request['text']), ('prompt.submit', target, text))
         self.assertEqual(request['api_text'], extra + '\n\n' + text)
+        for line in ('Player level: 23', 'Player class: Cazador', 'Player race: Enano', 'Player faction: Alliance'):
+            self.assertIn(line, request['api_text'].splitlines())
         self.assertNotIn('attachments', request)
         self.H.LoadSlot()
         self.assertEqual(self.H.PendingRecords(), 0)
@@ -287,7 +295,8 @@ class QuestButtonTest(unittest.TestCase):
 
     def test_popup_uses_its_own_selection_and_handles_missing_objectives_and_position(self):
         self.login(late=True)
-        self.lua.execute("GetLocale = nil; C_Map.GetPlayerMapPosition = function() return nil end")
+        self.lua.execute("""GetLocale = nil; C_Map.GetPlayerMapPosition = function() return nil end;
+            UnitClass = nil; UnitRace = nil; UnitFactionGroup = nil; UnitLevel = function() return -1 end""")
         self.g.QuestMapFrame_ShowQuestDetails(42)
         popup = self.g.QuestLogPopupDetailFrame
         popup.ShowQuest(popup, 43)
@@ -299,7 +308,8 @@ class QuestButtonTest(unittest.TestCase):
         self.assertIn('Objectives unavailable', extra)
         self.assertIn('Quest is complete', extra)
         self.assertNotIn('Colmillos', extra)
-        self.assertNotIn('Player coordinates:', extra)
+        for field in ('coordinates', 'level', 'class', 'race', 'faction'):
+            self.assertNotIn(f'Player {field}:', extra)
 
     def test_no_request_for_missing_quest_or_hidden_panel(self):
         self.login()

@@ -690,7 +690,7 @@ end
 local QUEST_COPY = {
 	en = {
 		label = "Ask Hermes",
-		detail = "Ask what is left and where to do it. Sends this quest's objectives, progress and your location when you choose a conversation. No screenshot.",
+		detail = "Sends this quest's objectives and progress, plus your level, class, race, faction and location, when you choose a conversation. No screenshot.",
 		new = "New conversation",
 		existing = "Existing conversation",
 		untitled = "Untitled",
@@ -701,7 +701,7 @@ local QUEST_COPY = {
 	},
 	es = {
 		label = "Preguntar a Hermes",
-		detail = "Pregunta qué te falta y dónde hacerlo. Envía los objetivos, el progreso y tu ubicación al elegir conversación. Sin captura.",
+		detail = "Al elegir conversación se envían los objetivos y el progreso de la misión, tu nivel, clase, raza, facción y ubicación. Sin captura.",
 		new = "Nueva conversación",
 		existing = "Conversación existente",
 		untitled = "Sin título",
@@ -717,7 +717,7 @@ function H.QuestCopy()
 	return (locale == "esES" or locale == "esMX") and QUEST_COPY.es or QUEST_COPY.en
 end
 
--- Read only the selected quest and the player's position, never the whole quest log or map cursor.
+-- Read only the chosen quest and relevant player fields, never the whole quest log or map cursor.
 function H.AskQuest(questID, sid)
 	if type(questID) ~= "number" or questID <= 0 then return end
 	local copy, session = H.QuestCopy(), H.SessionRow(sid)
@@ -764,6 +764,16 @@ function H.AskQuest(questID, sid)
 		end
 	end
 	if count == 0 then lines[#lines + 1] = "Objectives unavailable in the client." end
+
+	-- These affect quest eligibility and travel advice; names and realms do not.
+	local level = Read(UnitLevel, "player")
+	if type(level) == "number" and level > 0 then
+		lines[#lines + 1] = string.format("Player level: %d", level)
+	end
+	for _, field in ipairs({ { "class", UnitClass }, { "race", UnitRace }, { "faction", UnitFactionGroup } }) do
+		local value = ShortText(Read(field[2], "player"), 80)
+		if value ~= "" then lines[#lines + 1] = "Player " .. field[1] .. ": " .. value end
+	end
 
 	local zone, sub = ShortText(Read(GetRealZoneText), 120), ShortText(Read(GetSubZoneText), 120)
 	if zone ~= "" or sub ~= "" then
