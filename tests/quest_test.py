@@ -43,16 +43,58 @@ C_QuestLog = {
     IsComplete = function(id) return id == 43 end,
 }
 
+MenuUtil = { CreateContextMenu = function(_, build)
+    STUB.questMenu = {}
+    local function menu(entries)
+        return {
+            SetScrollMode = function() end,
+            CreateButton = function(_, label, callback)
+                local children = {}
+                local item = menu(children)
+                item.children = children
+                item.click = callback
+                entries[label] = item
+                return item
+            end,
+        }
+    end
+    build(nil, menu(STUB.questMenu))
+end }
+
+local create = CreateFrame
+function CreateFrame(kind, name, parent, template)
+    local f = create(kind, name, parent, template)
+    local setPoint = f.SetPoint
+    f.SetPoint = function(self, point, relative, relativePoint, x, y)
+        self._anchors = self._anchors or {}
+        self._anchors[point] = { point, relative, relativePoint, x, y }
+        setPoint(self, point, relative, relativePoint, x, y)
+    end
+    f.GetPoint = function(self, point)
+        local anchors = self._anchors or {}
+        return unpack(anchors[point] or anchors.BOTTOMLEFT or {})
+    end
+    return f
+end
+
+local function AddFooter(panel, height, scrollHeight)
+    panel.AbandonButton = CreateFrame('Button', nil, panel)
+    panel.ShareButton = CreateFrame('Button', nil, panel)
+    panel.TrackButton = CreateFrame('Button', nil, panel)
+    panel.AbandonButton:SetHeight(height)
+    panel.ScrollFrame = CreateFrame('ScrollFrame', nil, panel)
+    panel.ScrollFrame:SetHeight(scrollHeight)
+end
+
 function STUB.AddQuestPanels()
     local map = CreateFrame('Frame', 'QuestMapFrame', UIParent)
     local details = CreateFrame('Frame', nil, map)
     map.DetailsFrame = details
     details.BackFrame = CreateFrame('Frame', nil, details)
     details.BackFrame.BackButton = CreateFrame('Button', nil, details.BackFrame)
-    details.BackFrame.AccountCompletedNotice = CreateFrame('Frame', nil, details.BackFrame)
-    details.BackFrame.AccountCompletedNotice:Hide()
-    details.AbandonButton = CreateFrame('Button', nil, details)
-    details.ShareButton = CreateFrame('Button', nil, details)
+    AddFooter(details, 22, 430)
+    details.RewardsFrameContainer = CreateFrame('Frame', nil, details)
+    details.RewardsFrameContainer:SetPoint('BOTTOMLEFT', details, 'BOTTOMLEFT', 0, 23)
     details:Hide()
     function QuestMapFrame_ShowQuestDetails(id)
         details.questID = id
@@ -61,8 +103,8 @@ function STUB.AddQuestPanels()
     function QuestMapFrame_GetDetailQuestID() return details.questID end
 
     local popup = CreateFrame('Frame', 'QuestLogPopupDetailFrame', UIParent)
-    popup.AbandonButton = CreateFrame('Button', nil, popup)
-    popup.ShareButton = CreateFrame('Button', nil, popup)
+    AddFooter(popup, 21, 403)
+    popup.RewardsFrameContainer = false -- the permissive stub otherwise supplies a no-op function
     popup.ShowMapButton = CreateFrame('Button', nil, popup)
     popup:Hide()
     function popup:ShowQuest(id) self.questID = id; self:Show() end
@@ -101,6 +143,74 @@ class QuestButtonTest(unittest.TestCase):
         self.assertIsNotNone(button._scripts.OnClick)
         button._scripts.OnClick(button)
 
+    def choose(self, name, destination=None, *, session=None):
+        self.click(name)
+        menu = self.g.STUB.questMenu
+        self.assertIsNotNone(menu, 'click must offer a destination before sending')
+        if destination is not None:
+            choice = menu[destination]
+            if session is not None:
+                choice = choice.children[session]
+            self.assertIsNotNone(choice.click)
+            choice.click()
+
+    def test_button_is_its_own_full_width_native_footer_row(self):
+        self.login()
+        rawequal: Any = self.lua.eval('rawequal')
+        for panel, name, height in (
+            (self.g.QuestMapFrame.DetailsFrame, 'HermesWoWQuestMapAsk', 22),
+            (self.g.QuestLogPopupDetailFrame, 'HermesWoWQuestPopupAsk', 21),
+        ):
+            button = self.g[name]
+            self.assertEqual(button.GetHeight(button), height, name)
+            anchors = button._anchors
+            self.assertIsNotNone(anchors['BOTTOMLEFT'], name)
+            self.assertTrue(rawequal(anchors['BOTTOMLEFT'][2], panel.AbandonButton))
+            self.assertEqual(anchors['BOTTOMLEFT'][3], 'TOPLEFT')
+            self.assertGreater(anchors['BOTTOMLEFT'][5], 0)
+            self.assertTrue(rawequal(anchors['BOTTOMRIGHT'][2], panel.TrackButton))
+            self.assertEqual(anchors['BOTTOMRIGHT'][3], 'TOPRIGHT')
+            self.assertEqual(button.GetText(button), 'Preguntar a Hermes')
+            self.assertEqual(panel.ScrollFrame.GetHeight(panel.ScrollFrame), (430 if height == 22 else 403) - height - 2)
+        rewards = self.g.QuestMapFrame.DetailsFrame.RewardsFrameContainer
+        self.assertEqual(rewards._anchors['BOTTOMLEFT'][5], 23 + 22 + 2)
+
+    def test_menu_allows_explicit_new_without_switching_the_open_session(self):
+        self.login()
+        self.H.db.selected = 'work-session'
+        self.g.QuestMapFrame_ShowQuestDetails(42)
+        self.choose('HermesWoWQuestMapAsk')
+        self.assertEqual(self.H.PendingRecords(), 0)
+        self.assertEqual(self.g.objectiveReads, 0)
+        self.g.STUB.questMenu['Nueva conversación'].click()
+        op, target, mid, _, _ = self.one_send()
+        self.assertEqual((op, target), ('new', ''))
+        self.lua.execute(f"""HermesWoW.ApplyInbox({{ now = time(), tok = HermesWoW.db.token,
+            acks = {{ {mid} }}, sends = {{ ['{mid}'] = {{ state = 'started', sid = 'quest-session' }} }} }})""")
+        self.assertEqual(self.H.db.selected, 'work-session')
+        self.assertEqual(self.H.db.sends[mid].sid, 'quest-session')
+        self.assertEqual(self.H.PendingRecords(), 0)
+
+    def test_menu_sends_to_the_named_session_not_the_current_one(self):
+        self.login()
+        self.H.db.selected = 'work-session'
+        self.lua.execute("""HermesWoW.ApplyInbox({ now = time(), tok = HermesWoW.db.token,
+            sessions = {{id = 'work-session', title = 'Trabajo', n = 1},
+                {id = 'wow-session', title = 'WoW', n = 2}} })""")
+        self.g.QuestMapFrame_ShowQuestDetails(42)
+        self.choose('HermesWoWQuestMapAsk', 'Conversación existente', session='WoW')
+        self.assertEqual(self.one_send()[:2], ('send', 'wow-session'))
+        self.assertEqual(self.H.db.selected, 'work-session')
+
+    def test_stale_menu_cannot_send_a_different_quest(self):
+        self.login()
+        self.g.QuestMapFrame_ShowQuestDetails(42)
+        self.choose('HermesWoWQuestMapAsk')
+        self.g.QuestMapFrame_ShowQuestDetails(43)
+        self.g.STUB.questMenu['Nueva conversación'].click()
+        self.assertEqual(self.H.PendingRecords(), 0)
+        self.assertEqual(self.g.objectiveReads, 0)
+
     def one_send(self):
         frame = self.sim.strip_payload()
         assert frame is not None, "button must put a request on the actual pixel strip"
@@ -117,13 +227,15 @@ class QuestButtonTest(unittest.TestCase):
     def test_map_click_captures_displayed_quest_and_prints_reply(self):
         self.login()
         self.H.db.selected = 'existing-wow-session'
+        self.lua.execute("""HermesWoW.ApplyInbox({ now = time(), tok = HermesWoW.db.token,
+            sessions = {{ id = 'existing-wow-session', title = 'WoW', n = 1 }} })""")
         self.H.db.context = True  # The quest button still sends only the scoped snapshot.
         self.H.ui.shotCheck.SetChecked(self.H.ui.shotCheck, True)
         self.g.QuestMapFrame_ShowQuestDetails(43)
         self.g.QuestMapFrame_ShowQuestDetails(42)
         self.assertEqual(self.g.objectiveReads, 0, 'do not gather context just by opening a quest')
         self.assertEqual(self.H.PendingRecords(), 0)
-        self.click('HermesWoWQuestMapAsk')
+        self.choose('HermesWoWQuestMapAsk', 'Conversación existente', session='WoW')
         op, target, mid, text, extra = self.one_send()
         self.assertEqual((op, target), ('send', 'existing-wow-session'))
         self.assertIn('¿Qué me falta', text)
@@ -179,7 +291,7 @@ class QuestButtonTest(unittest.TestCase):
         self.g.QuestMapFrame_ShowQuestDetails(42)
         popup = self.g.QuestLogPopupDetailFrame
         popup.ShowQuest(popup, 43)
-        self.click('HermesWoWQuestPopupAsk')
+        self.choose('HermesWoWQuestPopupAsk', 'New conversation')
         op, target, _, text, extra = self.one_send()
         self.assertEqual((op, target), ('new', ''))
         self.assertIn('What do I still need', text)
@@ -192,47 +304,78 @@ class QuestButtonTest(unittest.TestCase):
     def test_no_request_for_missing_quest_or_hidden_panel(self):
         self.login()
         self.g.QuestMapFrame_ShowQuestDetails(999)
-        self.click('HermesWoWQuestMapAsk')
+        self.choose('HermesWoWQuestMapAsk', 'Nueva conversación')
         self.assertEqual(self.H.PendingRecords(), 0)
         self.g.QuestMapFrame_ShowQuestDetails(42)
+        self.choose('HermesWoWQuestMapAsk')
         details = self.g.QuestMapFrame.DetailsFrame
         details.Hide(details)
-        self.click('HermesWoWQuestMapAsk')
+        self.g.STUB.questMenu['Nueva conversación'].click()
         self.assertEqual(self.H.PendingRecords(), 0)
         self.assertEqual(self.g.objectiveReads, 0)
 
     def test_rejected_new_question_does_not_block_retry(self):
         self.login()
         self.g.QuestMapFrame_ShowQuestDetails(42)
-        self.click('HermesWoWQuestMapAsk')
+        self.choose('HermesWoWQuestMapAsk', 'Nueva conversación')
         _, _, mid, _, _ = self.one_send()
         self.lua.execute(f"""HermesWoW.ApplyInbox({{ now = time(), tok = HermesWoW.db.token,
             acks = {{ {mid} }}, sends = {{ ['{mid}'] = {{ state = 'error', err = 'refused' }} }} }})
             local before = GetTime
             GetTime = function() return before() + 4 end
         """)
-        self.click('HermesWoWQuestMapAsk')
+        self.choose('HermesWoWQuestMapAsk', 'Nueva conversación')
         self.assertEqual(self.one_send()[0], 'new')
 
     def test_completed_turn_without_reply_does_not_block_another_quest(self):
         self.login()
         self.H.db.selected = 'wow-session'
-        self.g.QuestMapFrame_ShowQuestDetails(42)
-        self.click('HermesWoWQuestMapAsk')
+        def ask(qid):
+            self.g.QuestMapFrame_ShowQuestDetails(qid)
+            self.choose('HermesWoWQuestMapAsk', 'Conversación existente', session='WoW')
+
+        self.lua.execute("""HermesWoW.ApplyInbox({ now = time(), tok = HermesWoW.db.token,
+            sessions = {{ id = 'wow-session', title = 'WoW', n = 2, status = 'live' }} })""")
+        ask(42)
         _, _, mid, _, _ = self.one_send()
         self.lua.execute(f"""HermesWoW.ApplyInbox({{ now = time(), tok = HermesWoW.db.token,
             acks = {{ {mid} }}, sends = {{ ['{mid}'] = {{ state = 'done', sid = 'wow-session' }} }},
             views = {{ ['wow-session'] = {{ running = false, msgs = {{}} }} }} }})""")
-        self.g.QuestMapFrame_ShowQuestDetails(43)
-        self.click('HermesWoWQuestMapAsk')
-        self.assertIn('Entrega en Villadorada', self.one_send()[3])
+        ask(43)
+        _, _, mid, text, _ = self.one_send()
+        self.assertIn('Entrega en Villadorada', text)
+        self.lua.execute(f"""HermesWoW.ApplyInbox({{ now = time(), tok = HermesWoW.db.token,
+            acks = {{ {mid} }}, sends = {{ ['{mid}'] = {{ state = 'done', sid = 'wow-session' }} }},
+            views = {{ ['wow-session'] = {{ running = false, msgs = {{
+                {{ r = 'assistant', t = 'Una sola respuesta.', ts = time() }} }} }} }} }})""")
+        self.assertEqual(sum('Una sola respuesta.' in line for line in self.g.STUB.chat.values()), 1)
+
+    def test_queued_question_blocks_another_on_the_same_session(self):
+        self.login()
+        self.lua.execute("""HermesWoW.ApplyInbox({ now = time(), tok = HermesWoW.db.token,
+            sessions = {{ id = 'wow-session', title = 'WoW', n = 2, status = 'live' }} })""")
+        def ask(qid):
+            self.g.QuestMapFrame_ShowQuestDetails(qid)
+            self.choose('HermesWoWQuestMapAsk', 'Conversación existente', session='WoW')
+
+        self.H.db.selected = 'wow-session'
+        ask(42)
+        _, _, mid, _, _ = self.one_send()
+        self.lua.execute(f"""HermesWoW.ApplyInbox({{ now = time(), tok = HermesWoW.db.token,
+            acks = {{ {mid} }}, sends = {{ ['{mid}'] = {{ state = 'queued', sid = 'wow-session' }} }},
+            views = {{ ['wow-session'] = {{ running = false, msgs = {{}} }} }} }})""")
+        ask(43)
+        self.assertEqual(self.H.PendingRecords(), 0)
+        self.assertEqual(self.g.objectiveReads, 1)
 
     def test_no_request_queues_behind_busy_session(self):
         self.login()
         self.H.db.selected = 'busy'
-        self.lua.execute("HermesWoW.run.views.busy = { running = true }")
+        self.lua.execute("""HermesWoW.ApplyInbox({ now = time(), tok = HermesWoW.db.token,
+            sessions = {{ id = 'busy', title = 'Ocupada', n = 2, status = 'live' }},
+            views = { busy = { running = true } } })""")
         self.g.QuestMapFrame_ShowQuestDetails(42)
-        self.click('HermesWoWQuestMapAsk')
+        self.choose('HermesWoWQuestMapAsk', 'Conversación existente', session='Ocupada')
         self.assertEqual(self.H.PendingRecords(), 0)
         self.assertEqual(self.g.objectiveReads, 0)
 

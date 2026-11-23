@@ -661,7 +661,7 @@ function H.Send(sid, text, extra, model, opts)
 	db.sends[mid] = { sid = sid, text = text, state = "sending", t = time(), isNew = not sid, parts = #parts,
 		shot = opts.shot and "wanted" or nil, quick = opts.quick or nil }
 	run.lastSend = { sid = sid, text = text, at = Now() }
-	if not sid then run.awaitNew = mid end
+	if not sid and not opts.keepSelection then run.awaitNew = mid end
 	H.Changed()
 	return mid
 end
@@ -690,7 +690,10 @@ end
 local QUEST_COPY = {
 	en = {
 		label = "Ask Hermes",
-		detail = "Ask what is left and where to do it. Sends this quest's objectives, progress and your location to the current Hermes conversation (or a new one). No screenshot.",
+		detail = "Ask what is left and where to do it. Sends this quest's objectives, progress and your location when you choose a conversation. No screenshot.",
+		new = "New conversation",
+		existing = "Existing conversation",
+		untitled = "Untitled",
 		question = 'What do I still need to do for "%s", and where can I do it?',
 		unavailable = "This quest's details are not available yet.",
 		busy = "Wait for the current Hermes reply before asking about this quest.",
@@ -698,7 +701,10 @@ local QUEST_COPY = {
 	},
 	es = {
 		label = "Preguntar a Hermes",
-		detail = "Pregunta qué te falta y dónde hacerlo. Envía los objetivos, el progreso y tu ubicación a la conversación actual de Hermes (o a una nueva). Sin captura.",
+		detail = "Pregunta qué te falta y dónde hacerlo. Envía los objetivos, el progreso y tu ubicación al elegir conversación. Sin captura.",
+		new = "Nueva conversación",
+		existing = "Conversación existente",
+		untitled = "Sin título",
 		question = '¿Qué me falta para completar «%s» y dónde lo consigo?',
 		unavailable = "Los detalles de esta misión aún no están disponibles.",
 		busy = "Espera a que Hermes termine de responder antes de preguntar por esta misión.",
@@ -712,10 +718,13 @@ function H.QuestCopy()
 end
 
 -- Read only the selected quest and the player's position, never the whole quest log or map cursor.
-function H.AskQuest(questID)
+function H.AskQuest(questID, sid)
 	if type(questID) ~= "number" or questID <= 0 then return end
-	local copy, sid = H.QuestCopy(), db.selected
-	if H.Busy(sid) then H.Print(copy.busy) return end
+	local copy, session = H.QuestCopy(), H.SessionRow(sid)
+	if H.Busy(sid) or H.QuickPending(sid, true) or (session and (session.status == "running" or session.status == "waiting")) then
+		H.Print(copy.busy)
+		return
+	end
 
 	local function Read(fn, ...)
 		if type(fn) ~= "function" then return nil end
@@ -773,14 +782,16 @@ function H.AskQuest(questID)
 	end
 	lines[#lines + 1] = "Give concise advice for this version. If the destination is uncertain, say so; do not guess coordinates."
 	local mid = H.Send(sid, string.format(copy.question, title), table.concat(lines, "\n"),
-		not sid and db.newModel or nil, { quick = true })
+		not sid and db.newModel or nil, { quick = true, keepSelection = true })
 	if mid then H.Print(copy.queued) end
 end
 
 -- True while a quick question to this session waits for its reply.
-function H.QuickPending(sid)
+function H.QuickPending(sid, unfinished)
 	for _, s in pairs(db.sends) do
-		if s.quick and not s.printed and s.sid == sid then return true end
+		if s.quick and not s.printed and s.sid == sid and (not unfinished or (s.state ~= "done" and s.state ~= "error")) then
+			return true
+		end
 	end
 	return false
 end
@@ -813,7 +824,7 @@ function H.PrintQuickReplies()
 			if s.state == "error" then
 				s.printed = true
 				H.Print("|cffff4040could not send:|r " .. H.Escape(s.err or "unknown error"))
-			elseif v and not v.running and last and last.r == "assistant" and (last.ts or 0) >= (s.t or 0) then
+			elseif v and not v.running and s.state == "done" and last and last.r == "assistant" and (last.ts or 0) >= (s.t or 0) then
 				s.printed = true
 				if not (H.IsShown and H.IsShown() and db.selected == s.sid) then
 					local lines = ChatLines(last.t or "", 8)
@@ -823,6 +834,7 @@ function H.PrintQuickReplies()
 					if total > #lines then DEFAULT_CHAT_FRAME:AddMessage("  |cff808080... type /hermes to read the rest.|r") end
 				end
 			end
+			if s.state == "done" and v and not v.running then s.printed = true end
 		end
 	end
 end

@@ -1050,22 +1050,61 @@ function H.Toggle()
 	if ui.frame:IsShown() then ui.frame:Hide() else ui.frame:SetAlpha(1) ui.frame:Show() end
 end
 
--- Forever's M/L map details and the separate quest detail popup have their own
--- questID. Use their spare header space, not the scroll/rewards area above the footer.
-local function AddQuestButton(panel, name, anchor)
-	if not (panel and anchor and panel.ShareButton and panel.AbandonButton) or _G[name] then return end
+local function QuestDestinationMenu(button, panel)
+	local questID = panel.questID
+	if not panel:IsVisible() or not questID or questID <= 0 then return end
 	local copy = H.QuestCopy()
+	local function Ask(sid)
+		-- The map can switch quests while a menu is still open.
+		if panel:IsVisible() and panel.questID == questID then H.AskQuest(questID, sid) end
+	end
+	MenuUtil.CreateContextMenu(button, function(_, menu)
+		menu:CreateButton(copy.new, function() Ask(nil) end)
+		local sessions = H.Sessions()
+		if #sessions == 0 then return end
+		local existing = menu:CreateButton(copy.existing)
+		existing:SetScrollMode(280)
+		local function Title(session)
+			return session.title and session.title ~= "" and session.title or copy.untitled
+		end
+		local labels = {}
+		for _, session in ipairs(sessions) do
+			local title = Title(session)
+			labels[title] = (labels[title] or 0) + 1
+		end
+		local seen = {}
+		for _, session in ipairs(sessions) do
+			local sid, title = session.id, Title(session)
+			seen[title] = (seen[title] or 0) + 1
+			local label = labels[title] > 1 and string.format("%s (%d)", title, seen[title]) or title
+			existing:CreateButton(H.Escape(label), function()
+				if H.SessionRow(sid) then Ask(sid) end
+			end)
+		end
+	end)
+end
+
+-- Reserve a full new row without covering the scroll contents or the rewards.
+local function AddQuestButton(panel, name)
+	if not (panel and panel.AbandonButton and panel.TrackButton and panel.ScrollFrame)
+		or not (MenuUtil and MenuUtil.CreateContextMenu) or _G[name] then return end
+	local copy = H.QuestCopy()
+	local left, right = panel.AbandonButton, panel.TrackButton
+	local height, gap = left:GetHeight(), 2
 	local b = CreateFrame("Button", name, panel, "UIPanelButtonTemplate")
 	b:SetText(copy.label)
-	b:SetSize(math.max(112, b:GetFontString():GetStringWidth() + 18), 22)
-	if name == "HermesWoWQuestMapAsk" then
-		b:SetPoint("LEFT", anchor, "RIGHT", 5, 0)
-	else
-		b:SetPoint("TOPLEFT", panel, "TOPLEFT", 62, -32)
+	b:SetHeight(height)
+	b:SetPoint("BOTTOMLEFT", left, "TOPLEFT", 0, gap)
+	b:SetPoint("BOTTOMRIGHT", right, "TOPRIGHT", 0, gap)
+	local inset = height + gap
+	local scroll = panel.ScrollFrame
+	scroll:SetHeight(scroll:GetHeight() - inset)
+	local rewards = panel.RewardsFrameContainer
+	if rewards then
+		local point, relative, relativePoint, x, y = rewards:GetPoint(1)
+		if point then rewards:SetPoint(point, relative, relativePoint, x, y + inset) end
 	end
-	b:SetScript("OnClick", function()
-		if panel:IsVisible() then H.AskQuest(panel.questID) end
-	end)
+	b:SetScript("OnClick", function(self) QuestDestinationMenu(self, panel) end)
 	Tooltip(b, function(tt)
 		tt:AddLine(copy.label, 1, 1, 1)
 		tt:AddLine(copy.detail, nil, nil, nil, true)
@@ -1073,10 +1112,8 @@ local function AddQuestButton(panel, name, anchor)
 end
 
 local function AddQuestButtons()
-	local map = QuestMapFrame and QuestMapFrame.DetailsFrame
-	AddQuestButton(map, "HermesWoWQuestMapAsk", map and map.BackFrame and map.BackFrame.BackButton)
-	local popup = QuestLogPopupDetailFrame
-	AddQuestButton(popup, "HermesWoWQuestPopupAsk", popup and popup.ShowMapButton)
+	AddQuestButton(QuestMapFrame and QuestMapFrame.DetailsFrame, "HermesWoWQuestMapAsk")
+	AddQuestButton(QuestLogPopupDetailFrame, "HermesWoWQuestPopupAsk")
 end
 
 local function SetupQuestButtons()

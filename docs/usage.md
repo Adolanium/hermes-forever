@@ -48,15 +48,16 @@ Ask without opening the window:
 
 ## Ask about a quest
 
-With the default UI, open the world map (`M`) or quest log (`L`), select a quest, then click
-**Ask Hermes** near the top of the quest details. The button is also available in the separate
-quest details popup. Hermes is asked what is left to do and where to do it. The reply appears in
-game chat, or in the conversation if you already have it open.
+With the default UI, open the world map (`M`) or quest log (`L`) and select a quest. Click
+**Ask Hermes**, the full-width button just above **Abandon**, **Share** and **Track**. Choose
+**New conversation** or pick a session under **Existing conversation**. Nothing is sent until
+you choose a destination, and the session already selected in HermesWoW stays selected.
+The button is also available in the separate quest details popup. The reply appears in game
+chat, or in the conversation if you already have the destination open.
 
-The button sends only the displayed quest's name, ID, objectives and progress, plus your current
-zone and player coordinates when available. It does not send a screenshot or your full quest log,
-regardless of the **Game info** and **Screenshot** settings. Nothing is sent until you click.
-Like `/hermes ask`, this uses the selected Hermes session (or starts a new one if none is selected).
+The button sends only the displayed quest's name, ID, objectives, progress and completion
+status, plus your current zone and player coordinates when available. It does not send a
+screenshot or your full quest log, regardless of the **Game info** and **Screenshot** settings.
 
 ## Screenshots
 
