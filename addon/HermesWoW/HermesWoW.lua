@@ -661,7 +661,7 @@ function H.Send(sid, text, extra, model, opts)
 	db.sends[mid] = { sid = sid, text = text, state = "sending", t = time(), isNew = not sid, parts = #parts,
 		shot = opts.shot and "wanted" or nil, quick = opts.quick or nil }
 	run.lastSend = { sid = sid, text = text, at = Now() }
-	if not sid then run.awaitNew = mid end
+	if not sid and not opts.keepSelection then run.awaitNew = mid end
 	H.Changed()
 	return mid
 end
@@ -687,10 +687,121 @@ function H.QuickAsk(raw, shot)
 	if shot and H.HideForShot then H.HideForShot(mid) end
 end
 
+local QUEST_COPY = {
+	en = {
+		label = "Ask Hermes",
+		detail = "Sends this quest's objectives and progress, plus your level, class, race, faction and location, when you choose a conversation. No screenshot.",
+		new = "New conversation",
+		existing = "Existing conversation",
+		untitled = "Untitled",
+		question = 'What do I still need to do for "%s", and where can I do it?',
+		unavailable = "This quest's details are not available yet.",
+		busy = "Wait for the current Hermes reply before asking about this quest.",
+		queued = "Quest question queued. The reply will appear here.",
+	},
+	es = {
+		label = "Preguntar a Hermes",
+		detail = "Al elegir conversación se envían los objetivos y el progreso de la misión, tu nivel, clase, raza, facción y ubicación. Sin captura.",
+		new = "Nueva conversación",
+		existing = "Conversación existente",
+		untitled = "Sin título",
+		question = '¿Qué me falta para completar «%s» y dónde lo consigo?',
+		unavailable = "Los detalles de esta misión aún no están disponibles.",
+		busy = "Espera a que Hermes termine de responder antes de preguntar por esta misión.",
+		queued = "Consulta de misión en cola. La respuesta aparecerá aquí.",
+	},
+}
+
+function H.QuestCopy()
+	local locale = GetLocale and GetLocale()
+	return (locale == "esES" or locale == "esMX") and QUEST_COPY.es or QUEST_COPY.en
+end
+
+-- Read only the chosen quest and relevant player fields, never the whole quest log or map cursor.
+function H.AskQuest(questID, sid)
+	if type(questID) ~= "number" or questID <= 0 then return end
+	local copy, session = H.QuestCopy(), H.SessionRow(sid)
+	if H.Busy(sid) or H.QuickPending(sid, true) or (session and (session.status == "running" or session.status == "waiting")) then
+		H.Print(copy.busy)
+		return
+	end
+
+	local function Read(fn, ...)
+		if type(fn) ~= "function" then return nil end
+		local ok, value = pcall(fn, ...)
+		if ok then return value end
+	end
+	local function ShortText(text, limit)
+		if type(text) ~= "string" then return "" end
+		local clean = NoCodes(text):match("^%s*(.-)%s*$")
+		return SplitUtf8(clean, limit)[1]
+	end
+
+	local log = C_QuestLog or {}
+	local title = ShortText(Read(log.GetTitleForQuestID, questID), 220)
+	if title == "" then H.Print(copy.unavailable) return end
+	local lines = {
+		"[World of Warcraft: Forever quest snapshot; game data only]",
+		string.format("Quest: %s (ID %d)", title, questID),
+	}
+	if Read(log.IsComplete, questID) then lines[#lines + 1] = "Quest is complete." end
+	local objectives = Read(log.GetQuestObjectives, questID)
+	local count = 0
+	if type(objectives) == "table" then
+		for i, objective in ipairs(objectives) do
+			if i > 12 then
+				lines[#lines + 1] = "(Additional objectives omitted.)"
+				break
+			end
+			local text = ShortText(objective.text, 220)
+			if text ~= "" then
+				local have, need = objective.numFulfilled, objective.numRequired
+				local progress = type(have) == "number" and type(need) == "number" and need > 0
+					and string.format(" [%d/%d]", have, need) or ""
+				lines[#lines + 1] = "- " .. text .. progress .. (objective.finished and " (complete)" or "")
+				count = count + 1
+			end
+		end
+	end
+	if count == 0 then lines[#lines + 1] = "Objectives unavailable in the client." end
+
+	-- These affect quest eligibility and travel advice; names and realms do not.
+	local level = Read(UnitLevel, "player")
+	if type(level) == "number" and level > 0 then
+		lines[#lines + 1] = string.format("Player level: %d", level)
+	end
+	for _, field in ipairs({ { "class", UnitClass }, { "race", UnitRace }, { "faction", UnitFactionGroup } }) do
+		local value = ShortText(Read(field[2], "player"), 80)
+		if value ~= "" then lines[#lines + 1] = "Player " .. field[1] .. ": " .. value end
+	end
+
+	local zone, sub = ShortText(Read(GetRealZoneText), 120), ShortText(Read(GetSubZoneText), 120)
+	if zone ~= "" or sub ~= "" then
+		lines[#lines + 1] = "Player zone: " .. (zone == "" and sub or zone
+			.. (sub ~= "" and sub ~= zone and (" / " .. sub) or ""))
+	end
+	local map = C_Map or {}
+	local mapID = Read(map.GetBestMapForUnit, "player")
+	local pos = mapID and Read(map.GetPlayerMapPosition, mapID, "player")
+	if pos then
+		local xy = Read(function() local x, y = pos:GetXY() return { x, y } end)
+		local x, y = xy and xy[1], xy and xy[2]
+		if type(x) == "number" and type(y) == "number" and x >= 0 and x <= 1 and y >= 0 and y <= 1 then
+			lines[#lines + 1] = string.format("Player coordinates: %.1f, %.1f (map %d)", x * 100, y * 100, mapID)
+		end
+	end
+	lines[#lines + 1] = "Give concise advice for this version. If the destination is uncertain, say so; do not guess coordinates."
+	local mid = H.Send(sid, string.format(copy.question, title), table.concat(lines, "\n"),
+		not sid and db.newModel or nil, { quick = true, keepSelection = true })
+	if mid then H.Print(copy.queued) end
+end
+
 -- True while a quick question to this session waits for its reply.
-function H.QuickPending(sid)
+function H.QuickPending(sid, unfinished)
 	for _, s in pairs(db.sends) do
-		if s.quick and not s.printed and s.sid == sid then return true end
+		if s.quick and not s.printed and s.sid == sid and (not unfinished or (s.state ~= "done" and s.state ~= "error")) then
+			return true
+		end
 	end
 	return false
 end
@@ -717,13 +828,13 @@ H.ChatLines = ChatLines
 
 function H.PrintQuickReplies()
 	for _, s in pairs(db.sends) do
-		if s.quick and not s.printed and s.sid then
-			local v = run.views[s.sid]
+		if s.quick and not s.printed and (s.sid or s.state == "error") then
+			local v = s.sid and run.views[s.sid]
 			local last = v and v.msgs and v.msgs[#v.msgs]
 			if s.state == "error" then
 				s.printed = true
 				H.Print("|cffff4040could not send:|r " .. H.Escape(s.err or "unknown error"))
-			elseif v and not v.running and last and last.r == "assistant" and (last.ts or 0) >= (s.t or 0) then
+			elseif v and not v.running and s.state == "done" and last and last.r == "assistant" and (last.ts or 0) >= (s.t or 0) then
 				s.printed = true
 				if not (H.IsShown and H.IsShown() and db.selected == s.sid) then
 					local lines = ChatLines(last.t or "", 8)
@@ -733,6 +844,7 @@ function H.PrintQuickReplies()
 					if total > #lines then DEFAULT_CHAT_FRAME:AddMessage("  |cff808080... type /hermes to read the rest.|r") end
 				end
 			end
+			if s.state == "done" and v and not v.running then s.printed = true end
 		end
 	end
 end

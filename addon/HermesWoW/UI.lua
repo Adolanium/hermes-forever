@@ -1050,8 +1050,84 @@ function H.Toggle()
 	if ui.frame:IsShown() then ui.frame:Hide() else ui.frame:SetAlpha(1) ui.frame:Show() end
 end
 
+local function QuestDestinationMenu(button, panel)
+	local questID = panel.questID
+	if not panel:IsVisible() or not questID or questID <= 0 then return end
+	local copy = H.QuestCopy()
+	local function Ask(sid)
+		-- The map can switch quests while a menu is still open.
+		if panel:IsVisible() and panel.questID == questID then H.AskQuest(questID, sid) end
+	end
+	MenuUtil.CreateContextMenu(button, function(_, menu)
+		menu:CreateButton(copy.new, function() Ask(nil) end)
+		local sessions = H.Sessions()
+		if #sessions == 0 then return end
+		local existing = menu:CreateButton(copy.existing)
+		existing:SetScrollMode(280)
+		local function Title(session)
+			return session.title and session.title ~= "" and session.title or copy.untitled
+		end
+		local labels = {}
+		for _, session in ipairs(sessions) do
+			local title = Title(session)
+			labels[title] = (labels[title] or 0) + 1
+		end
+		local seen = {}
+		for _, session in ipairs(sessions) do
+			local sid, title = session.id, Title(session)
+			seen[title] = (seen[title] or 0) + 1
+			local label = labels[title] > 1 and string.format("%s (%d)", title, seen[title]) or title
+			existing:CreateButton(H.Escape(label), function()
+				if H.SessionRow(sid) then Ask(sid) end
+			end)
+		end
+	end)
+end
+
+-- Reserve a full new row without covering the scroll contents or the rewards.
+local function AddQuestButton(panel, name)
+	if not (panel and panel.AbandonButton and panel.TrackButton and panel.ScrollFrame)
+		or not (MenuUtil and MenuUtil.CreateContextMenu) or _G[name] then return end
+	local copy = H.QuestCopy()
+	local left, right = panel.AbandonButton, panel.TrackButton
+	local height, gap = left:GetHeight(), 2
+	local b = CreateFrame("Button", name, panel, "UIPanelButtonTemplate")
+	b:SetText(copy.label)
+	b:SetHeight(height)
+	b:SetPoint("BOTTOMLEFT", left, "TOPLEFT", 0, gap)
+	b:SetPoint("BOTTOMRIGHT", right, "TOPRIGHT", 0, gap)
+	local inset = height + gap
+	local scroll = panel.ScrollFrame
+	scroll:SetHeight(scroll:GetHeight() - inset)
+	local rewards = panel.RewardsFrameContainer
+	if rewards then
+		local point, relative, relativePoint, x, y = rewards:GetPoint(1)
+		if point then rewards:SetPoint(point, relative, relativePoint, x, y + inset) end
+	end
+	b:SetScript("OnClick", function(self) QuestDestinationMenu(self, panel) end)
+	Tooltip(b, function(tt)
+		tt:AddLine(copy.label, 1, 1, 1)
+		tt:AddLine(copy.detail, nil, nil, nil, true)
+	end)
+end
+
+local function AddQuestButtons()
+	AddQuestButton(QuestMapFrame and QuestMapFrame.DetailsFrame, "HermesWoWQuestMapAsk")
+	AddQuestButton(QuestLogPopupDetailFrame, "HermesWoWQuestPopupAsk")
+end
+
+local function SetupQuestButtons()
+	AddQuestButtons()
+	local loader = CreateFrame("Frame")
+	loader:RegisterEvent("ADDON_LOADED")
+	loader:SetScript("OnEvent", function(_, _, name)
+		if name == "Blizzard_UIPanels_Game" or name == "Blizzard_WorldMap" then AddQuestButtons() end
+	end)
+end
+
 function H.CreateUI()
 	if ui.frame then return end
+	SetupQuestButtons()
 	local ok, f = pcall(CreateFrame, "Frame", "HermesWoWFrame", UIParent, "ButtonFrameTemplate")
 	if not ok then f = CreateFrame("Frame", "HermesWoWFrame", UIParent, "BasicFrameTemplateWithInset") end
 	ui.frame = f

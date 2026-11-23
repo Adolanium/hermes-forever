@@ -26,6 +26,7 @@ tests/
   format_test.py   Markdown rendering (offline)
   notify_test.py   sounds, toasts and minimap badge (offline)
   ui_test.py       search, pin, rename, quick questions, screenshot, combat (offline)
+  quest_test.py    quest details button, scoped context, and chat reply (offline)
   setup_test.py    disconnected status and local /hermes setup guidance (offline)
 ```
 
@@ -87,6 +88,7 @@ separate disposable environment if your Hermes runtime does not include it:
 python3 -B tests/format_test.py
 python3 -B tests/notify_test.py
 python3 -B tests/ui_test.py
+python3 -B tests/quest_test.py
 python3 -B tests/setup_test.py
 ```
 
@@ -106,6 +108,6 @@ conversation; create a named technical-test session instead.
 
 ## Not covered by tests
 
-- The in-game look of the window, the model picker and the checkbox.
+- The in-game look of the window, the model picker, the checkbox and the quest button at different UI scales.
 - The client's shift-click link insertion and its real tooltip lines.
 - Approval prompts against a profile that asks for approval. The test profile auto-approves.
