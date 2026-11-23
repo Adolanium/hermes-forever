@@ -1050,8 +1050,47 @@ function H.Toggle()
 	if ui.frame:IsShown() then ui.frame:Hide() else ui.frame:SetAlpha(1) ui.frame:Show() end
 end
 
+-- Forever's M/L map details and the separate quest detail popup have their own
+-- questID. Use their spare header space, not the scroll/rewards area above the footer.
+local function AddQuestButton(panel, name, anchor)
+	if not (panel and anchor and panel.ShareButton and panel.AbandonButton) or _G[name] then return end
+	local copy = H.QuestCopy()
+	local b = CreateFrame("Button", name, panel, "UIPanelButtonTemplate")
+	b:SetText(copy.label)
+	b:SetSize(math.max(112, b:GetFontString():GetStringWidth() + 18), 22)
+	if name == "HermesWoWQuestMapAsk" then
+		b:SetPoint("LEFT", anchor, "RIGHT", 5, 0)
+	else
+		b:SetPoint("TOPLEFT", panel, "TOPLEFT", 62, -32)
+	end
+	b:SetScript("OnClick", function()
+		if panel:IsVisible() then H.AskQuest(panel.questID) end
+	end)
+	Tooltip(b, function(tt)
+		tt:AddLine(copy.label, 1, 1, 1)
+		tt:AddLine(copy.detail, nil, nil, nil, true)
+	end)
+end
+
+local function AddQuestButtons()
+	local map = QuestMapFrame and QuestMapFrame.DetailsFrame
+	AddQuestButton(map, "HermesWoWQuestMapAsk", map and map.BackFrame and map.BackFrame.BackButton)
+	local popup = QuestLogPopupDetailFrame
+	AddQuestButton(popup, "HermesWoWQuestPopupAsk", popup and popup.ShowMapButton)
+end
+
+local function SetupQuestButtons()
+	AddQuestButtons()
+	local loader = CreateFrame("Frame")
+	loader:RegisterEvent("ADDON_LOADED")
+	loader:SetScript("OnEvent", function(_, _, name)
+		if name == "Blizzard_UIPanels_Game" or name == "Blizzard_WorldMap" then AddQuestButtons() end
+	end)
+end
+
 function H.CreateUI()
 	if ui.frame then return end
+	SetupQuestButtons()
 	local ok, f = pcall(CreateFrame, "Frame", "HermesWoWFrame", UIParent, "ButtonFrameTemplate")
 	if not ok then f = CreateFrame("Frame", "HermesWoWFrame", UIParent, "BasicFrameTemplateWithInset") end
 	ui.frame = f
