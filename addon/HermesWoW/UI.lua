@@ -465,13 +465,32 @@ local function Block(i)
 	return b
 end
 
--- Lay out a list of { role, head, text, color, copy } entries top to bottom.
-local function Layout(entries)
-	local width = ui.convScroll:GetWidth() - 8
-	ui.convContent:SetWidth(width + 8)
-	local y = -6
-	local n = 0
-	for _, e in ipairs(entries) do
+local function SameEntry(a, b)
+	if not b or a.head ~= b.head or a.text ~= b.text or a.font ~= b.font or a.rich ~= b.rich
+		or a.copy ~= b.copy or a.hint ~= b.hint then return false end
+	local c, d = a.color, b.color
+	return c == d or (c and d and c[1] == d[1] and c[2] == d[2] and c[3] == d[3])
+end
+
+-- Keep the unchanged prefix: streaming normally changes only the last entry.
+-- Once a row changes height, everything below it needs new anchors.
+local function Layout(entries, width, reset)
+	local prev = not reset and ui.convEntries or {}
+	local y, n, first = -6, 0, 1
+	while entries[first] and SameEntry(entries[first], prev[first]) do
+		local e, old = entries[first], prev[first]
+		e.lastBlock, e.nextY = old.lastBlock, old.nextY
+		-- Matching text can represent a different action (e.g. two failed sends).
+		if old.onClick or e.onClick then
+			for i = n + 1, e.lastBlock do ui.blocks[i].onClick = e.onClick end
+		end
+		n, y, first = e.lastBlock, e.nextY, first + 1
+	end
+	ui.convEntries = entries
+	if not reset and first > #entries and first > #prev then return false end
+	if reset then ui.convContent:SetWidth(width + 8) end
+	for ei = first, #entries do
+		local e = entries[ei]
 		-- Rich entries are Markdown (formatted per line, colors closed per line), the rest plain
 		-- text; both come out with every "|" escaped. Long text is split at line breaks only,
 		-- so no split lands inside an escape code.
@@ -517,9 +536,12 @@ local function Layout(entries)
 			b:Show()
 			y = y - h - ((ci == #chunks) and 10 or 0)
 		end
+		e.lastBlock, e.nextY = n, y
 	end
-	for i = n + 1, #(ui.blocks or {}) do ui.blocks[i]:Hide() end
+	for i = n + 1, (ui.convBlockCount or 0) do ui.blocks[i]:Hide() end
+	ui.convBlockCount = n
 	ui.convContent:SetHeight(math.max(1, -y))
+	return true
 end
 
 local function RoleHead(role, ts, extra)
@@ -601,6 +623,7 @@ local function ConversationEntries(sid)
 			hint = isErr and "Click to put this text back in the message box" or nil,
 			onClick = isErr and function()
 				ui.input:SetText(s.text)
+				ui.convSig = nil
 				H.Dismiss(p.mid)
 			end or nil,
 		}
@@ -613,17 +636,22 @@ local function AtBottom()
 	return range <= 0 or ui.convScroll:GetVerticalScroll() >= range - 20
 end
 
-local function RenderConversation(force)
+local function RenderConversation()
 	local sid = H.db.selected
 	local v = H.View(sid)
+	local width = ui.convScroll:GetWidth() - 8
 	local sig = table.concat({ tostring(sid), tostring(H.run.inbox and H.run.inbox.rev), tostring(H.db.nextId),
-		tostring(ui.convScroll:GetWidth()), tostring(v and v.running and v.live and math.floor((time() - (v.live.since or 0)) / 5)) }, "|")
-	if sig == ui.convSig and not force then return end
-	local stick = AtBottom() or ui.convSid ~= sid
+		tostring(width), tostring(v and v.running and v.live and math.floor((time() - (v.live.since or 0)) / 5)) }, "|")
+	if sig == ui.convSig then return end
+	local switched = ui.convSid ~= sid
+	local stick = AtBottom() or switched
 	ui.convSig, ui.convSid = sig, sid
-	Layout(ConversationEntries(sid))
-	if stick then
+	local resized = ui.convWidth ~= width
+	ui.convWidth = width
+	local changed = Layout(ConversationEntries(sid), width, switched or resized)
+	if changed and stick then
 		C_Timer.After(0, function()
+			if ui.convSid ~= sid then return end
 			ui.convScroll:UpdateScrollChildRect()
 			ui.convScroll:SetVerticalScroll(ui.convScroll:GetVerticalScrollRange())
 		end)

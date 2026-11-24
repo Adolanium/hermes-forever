@@ -26,6 +26,7 @@ tests/
   format_test.py   Markdown rendering (offline)
   notify_test.py   sounds, toasts and minimap badge (offline)
   ui_test.py       search, pin, rename, quick questions, screenshot, combat (offline)
+  conversation_test.py  transcript rendering, streaming and scroll behavior (offline)
   quest_test.py    quest details button, scoped context, and chat reply (offline)
   setup_test.py    disconnected status and local /hermes setup guidance (offline)
 ```
@@ -88,6 +89,7 @@ separate disposable environment if your Hermes runtime does not include it:
 python3 -B tests/format_test.py
 python3 -B tests/notify_test.py
 python3 -B tests/ui_test.py
+python3 -B tests/conversation_test.py
 python3 -B tests/quest_test.py
 python3 -B tests/setup_test.py
 ```
